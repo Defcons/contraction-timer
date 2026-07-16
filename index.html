@@ -137,6 +137,7 @@
   .log li .time { color: var(--soft); }
   .log li .dur { font-variant-numeric: tabular-nums; color: var(--text); }
   .log li .gap { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; min-width: 52px; text-align: right; }
+  .log li .note { grid-column: 1 / -1; font-size: 12px; color: var(--muted); font-style: italic; padding-bottom: 2px; margin-top: -4px; }
   .rowacts { display: flex; gap: 0; }
   .rowbtn {
     background: none;
@@ -240,6 +241,10 @@
       <div class="field">
         <label for="editDur">Duration (m:ss or seconds)</label>
         <input type="text" id="editDur" inputmode="numeric" placeholder="1:05">
+      </div>
+      <div class="field">
+        <label for="editNote">Note (optional)</label>
+        <input type="text" id="editNote" maxlength="120" placeholder="e.g. water broke, very strong…">
       </div>
       <div class="err" id="editErr"></div>
       <div class="btns">
@@ -387,11 +392,15 @@
   function fmtClock(ts) {
     return new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
   }
+  function esc(s) {
+    return s.replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  }
 
   // ---- edit (modal) / delete rows ----
   const editOverlay = document.getElementById('editOverlay');
   const editTime = document.getElementById('editTime');
   const editDur = document.getElementById('editDur');
+  const editNote = document.getElementById('editNote');
   const editErr = document.getElementById('editErr');
   let editIdx = null;
 
@@ -402,6 +411,7 @@
     const d = new Date(c.start);
     editTime.value = `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
     editDur.value = fmtDur(c.duration);
+    editNote.value = c.note || '';
     editErr.style.display = 'none';
     editOverlay.classList.add('open');
   }
@@ -432,6 +442,8 @@
     c.start = d.getTime();
     c.duration = durMs;
     c.end = c.start + durMs;
+    const note = editNote.value.trim();
+    if (note) c.note = note; else delete c.note;
     contractions.sort((a,b) => a.start - b.start);
     touch();
     render();
@@ -490,7 +502,7 @@
                       <span class="rowacts">
                         <button class="rowbtn" data-edit="${i}" aria-label="Edit">✎</button>
                         <button class="rowbtn" data-del="${i}" aria-label="Delete">✕</button>
-                      </span>`;
+                      </span>${c.note ? `<span class="note">${esc(c.note)}</span>` : ''}`;
       logList.appendChild(li);
     }
   }
