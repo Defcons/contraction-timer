@@ -1,8 +1,10 @@
 # CODE-MAP — contraction-timer
 
-_Last verified: 2026-07-16_
+_Last verified: 2026-07-18_
 
-Two-file app: static page on GitHub Pages + Cloudflare Worker for cross-device sync.
+Two apps in one repo, each a static page on GitHub Pages + its own Cloudflare Worker for cross-device sync: the contraction timer (root) and the baby activity tracker (`baby/`). They're linked to each other via small nav icons in the header (⏱️ / 🍼) but are otherwise fully independent — separate localStorage keys, separate sync rooms, separate Workers/KV namespaces.
+
+## Contraction timer (root)
 
 - **`index.html`** — the whole app (vanilla JS, no build). Key symbols:
   - `pull` / `pushState` / `applyRemote` / `touch` — sync protocol: full-state last-write-wins, `revision` = `Date.now()` of last local mutation; poll every `POLL_MS` (4s) + on visibility/online.
@@ -19,3 +21,16 @@ Gotchas:
 - KV is eventually consistent cross-colo (up to ~60s); same-household devices hit the same colo so sync is effectively instant. Don't "fix" apparent staleness when testing from different networks.
 - Conflict model is wholesale LWW — two devices mutating in the same poll window can clobber one tap. Accepted: one person logs in practice.
 - Worker PUTs can return CF edge error 1042 for ~1 min right after a fresh deploy — transient, retry.
+
+## Baby activity tracker (`baby/`)
+
+Same architecture as the contraction timer (local-first, `localStorage` + poll-based LWW sync), extended to several activity *types* instead of one.
+
+- **`baby/index.html`** — vanilla JS, no build. Key symbols:
+  - Entry shape: `{id, type, start, end?, duration?, note?, ...type-specific fields}`; `type` is one of `sleep`/`nurse`/`bottle`/`diaper`/`solid`. `nurse` has `side` (`L`/`R`/`both`); `bottle` has `amount`/`unit`/`milk`; `diaper` has `kind` (`wet`/`dirty`/`both`); `solid` has `food`.
+  - `active = { sleep, nurse }` — two independent in-progress timers (mirrors the contraction timer's single `active`, just two of them since sleep and nursing can each be running/tracked concurrently). Sleep/Nurse buttons toggle start↔stop directly, no modal. Bottle/Diaper/Solids are instantaneous events logged via a small modal (time defaults to now, editable).
+  - `pull`/`pushState`/`applyRemote`/`touch` — identical sync protocol to the contraction timer, but its own room/localStorage keys (`babySyncRoom_v1`, `babyLog_v1`) and its own Worker (`SYNC_URL`), so the two apps' sync rooms are unrelated even if the same room id string is reused.
+  - `editRow`/`deleteRow` — same delegation pattern as the contraction timer; `editRow` shows/hides field groups (`editEndWrap`, `editSideWrap`, `editAmountWrap`, `editMilkWrap`, `editKindWrap`, `editFoodWrap`) based on `entries[i].type`.
+  - Theme: `localStorage['btTheme']` (separate from the contraction timer's `ctTheme`, per-device, NOT synced).
+- **`baby-worker/index.js`** + **`baby-worker/wrangler.toml`** — separate Cloudflare Worker `baby-tracker-sync`, its own KV namespace (binding `STATE`). Same GET/PUT `/state/:room` contract as the contraction timer's worker. **Not yet deployed** — `wrangler.toml`'s KV `id` is a placeholder; before first deploy: `npx wrangler kv namespace create BABY_STATE` (run from `baby-worker/`), paste the returned id into `wrangler.toml`, then `npx wrangler deploy` (needs `wrangler login`).
+- To share the baby tracker across devices, open `baby/#r=<room-id>` once per device (same convention as the contraction timer's `#r=` link, kept out of this public repo).

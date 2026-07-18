@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Baby Tracker</title>
+<style>
+  :root {
+    --bg: #14110f;
+    --card: #1e1a17;
+    --border: #2c2621;
+    --border2: #241f1b;
+    --text: #f0ece6;
+    --muted: #8a827a;
+    --subtle: #6b635b;
+    --soft: #c9c1b8;
+    --accent: #4f7ea8;
+    --accent2: #3a6488;
+    --ok: #6f9a6f;
+    --warn: #b08a4f;
+    --go-text: #ff9d8a;
+  }
+  html[data-theme="light"] {
+    --bg: #f4f7f9;
+    --card: #ffffff;
+    --border: #dde6ec;
+    --border2: #e8eef2;
+    --text: #2b3238;
+    --muted: #7c8a94;
+    --subtle: #a3b0b8;
+    --soft: #4d5960;
+    --accent: #3d7bab;
+    --accent2: #2f628a;
+    --ok: #4c7d4c;
+    --warn: #9a7433;
+    --go-text: #a03a26;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 20px 16px 40px;
+    max-width: 560px;
+    margin: 0 auto;
+    transition: background 0.25s, color 0.25s;
+  }
+  .top { display: flex; align-items: flex-start; justify-content: space-between; }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .topbtns { display: flex; gap: 8px; }
+  .themebtn, .navlink {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 16px;
+    padding: 7px 10px;
+    cursor: pointer;
+    line-height: 1;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    color: var(--text);
+  }
+
+  .stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+  .stat {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 14px;
+  }
+  .stat .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 5px; }
+  .stat .value { font-size: 19px; font-weight: 600; }
+  .stat .value.active { color: var(--accent); }
+
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 10px; margin-top: 22px; }
+
+  .actiongrid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .actionbtn {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 16px 10px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    cursor: pointer;
+    text-align: center;
+    transition: transform 0.08s, background 0.15s, border-color 0.15s;
+  }
+  .actionbtn:active { transform: scale(0.98); }
+  .actionbtn .ico { font-size: 24px; display: block; margin-bottom: 4px; }
+  .actionbtn .sub2 { display: block; font-size: 11px; font-weight: 400; color: var(--muted); margin-top: 2px; }
+  .actionbtn.running { background: var(--accent); border-color: var(--accent2); color: #fff; animation: pulse 1.4s infinite; }
+  .actionbtn.running .sub2 { color: rgba(255,255,255,0.85); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.85; } }
+  .actionbtn.wide { grid-column: 1 / -1; }
+
+  .sidepick { display: flex; gap: 6px; margin: -2px 0 10px; }
+  .sidepick button {
+    flex: 1; padding: 8px; font-size: 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--card); color: var(--soft); cursor: pointer;
+  }
+  .sidepick button.sel { background: var(--accent); border-color: var(--accent2); color: #fff; font-weight: 600; }
+
+  .log { list-style: none; }
+  .log li {
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    gap: 10px;
+    align-items: center;
+    padding: 9px 4px;
+    border-bottom: 1px solid var(--border2);
+    font-size: 14px;
+  }
+  .log li .ico { font-size: 18px; }
+  .log li .main { display: flex; flex-direction: column; }
+  .log li .type { color: var(--text); font-weight: 500; }
+  .log li .detail { color: var(--muted); font-size: 12px; }
+  .log li .time { color: var(--soft); font-size: 13px; text-align: right; white-space: nowrap; }
+  .log li .note { grid-column: 1 / -1; font-size: 12px; color: var(--muted); font-style: italic; padding: 0 4px 2px 28px; margin-top: -4px; }
+  .rowacts { display: flex; gap: 0; }
+  .rowbtn {
+    background: none;
+    border: none;
+    color: var(--subtle);
+    font-size: 15px;
+    padding: 8px 6px;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .rowbtn:active { color: var(--text); }
+  .empty { color: var(--subtle); font-size: 14px; padding: 8px 4px; }
+
+  .overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.55);
+    display: none;
+    align-items: center; justify-content: center;
+    z-index: 10; padding: 16px;
+  }
+  .overlay.open { display: flex; }
+  .modal {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px;
+    width: 100%; max-width: 340px;
+    max-height: 88vh;
+    overflow-y: auto;
+  }
+  .modal h3 { font-size: 15px; font-weight: 600; margin-bottom: 14px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 5px; }
+  .field input, .field select {
+    width: 100%; padding: 10px; font-size: 16px;
+    border-radius: 10px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text);
+  }
+  .field .row2 { display: flex; gap: 8px; }
+  .field .row2 > * { flex: 1; }
+  .choicebtns { display: flex; gap: 8px; }
+  .choicebtns button {
+    flex: 1; padding: 12px 6px; font-size: 13px; font-weight: 600;
+    border-radius: 10px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--soft); cursor: pointer;
+  }
+  .choicebtns button.sel { background: var(--accent); border-color: var(--accent2); color: #fff; }
+  .modal .err { color: var(--go-text); font-size: 12px; margin-top: 2px; display: none; }
+  .modal .btns { display: flex; gap: 10px; margin-top: 16px; }
+  .modal .btns button {
+    flex: 1; padding: 12px; font-size: 14px;
+    border-radius: 10px; border: 1px solid var(--border);
+    background: var(--card); color: var(--soft); cursor: pointer;
+  }
+  .modal .btns button.primary { background: var(--accent); border-color: transparent; color: #fff; font-weight: 600; }
+  .saved-note { font-size: 11px; color: var(--subtle); text-align: center; margin-top: 18px; }
+  .saved-note.ok { color: var(--ok); }
+  .saved-note.warn { color: var(--warn); }
+</style>
+<script>document.documentElement.dataset.theme = (function(){ try { return localStorage.getItem('btTheme') || 'dark'; } catch(e) { return 'dark'; } })();</script>
+</head>
+<body>
+  <div class="top">
+    <div>
+      <h1>Baby Tracker</h1>
+    </div>
+    <div class="topbtns">
+      <a class="navlink" href="../" title="Contraction timer">⏱️</a>
+      <button class="themebtn" id="themeBtn" aria-label="Toggle light/dark">☀️</button>
+    </div>
+  </div>
+  <div class="sub">Tap to log feeds, diapers &amp; sleep.</div>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="label">Since last feed</div>
+      <div class="value" id="sinceFeed">—</div>
+    </div>
+    <div class="stat">
+      <div class="label">Since last diaper</div>
+      <div class="value" id="sinceDiaper">—</div>
+    </div>
+    <div class="stat">
+      <div class="label" id="sleepLabel">Sleep</div>
+      <div class="value" id="sleepVal">—</div>
+    </div>
+    <div class="stat">
+      <div class="label">Today</div>
+      <div class="value" id="todaySummary">0 feeds · 0 diapers</div>
+    </div>
+  </div>
+
+  <h2>Log activity</h2>
+  <div class="actiongrid">
+    <button class="actionbtn" id="sleepBtn">
+      <span class="ico">😴</span>Sleep
+      <span class="sub2" id="sleepBtnSub">Tap to start</span>
+    </button>
+    <button class="actionbtn" id="nurseBtn">
+      <span class="ico">🤱</span>Nurse
+      <span class="sub2" id="nurseBtnSub">Tap to start</span>
+    </button>
+    <button class="actionbtn" id="bottleBtn">
+      <span class="ico">🍼</span>Bottle
+      <span class="sub2">Amount &amp; type</span>
+    </button>
+    <button class="actionbtn" id="diaperBtn">
+      <span class="ico">💧</span>Diaper
+      <span class="sub2">Wet / dirty</span>
+    </button>
+    <button class="actionbtn wide" id="solidBtn">
+      <span class="ico">🥄</span>Solids
+      <span class="sub2">What &amp; when</span>
+    </button>
+  </div>
+  <div class="sidepick" id="nurseSidePick" style="display:none;">
+    <button data-side="L">Left</button>
+    <button data-side="R">Right</button>
+    <button data-side="both">Both</button>
+  </div>
+
+  <h2>Log</h2>
+  <ul class="log" id="logList">
+    <li class="empty">Nothing logged yet.</li>
+  </ul>
+
+  <div class="saved-note" id="syncNote">Saved automatically to this device.</div>
+
+  <!-- Bottle modal -->
+  <div class="overlay" id="bottleOverlay">
+    <div class="modal">
+      <h3>Log bottle</h3>
+      <div class="field">
+        <label for="bottleTime">Time</label>
+        <input type="time" id="bottleTime" step="60">
+      </div>
+      <div class="field">
+        <label>Amount</label>
+        <div class="row2">
+          <input type="number" id="bottleAmount" inputmode="decimal" min="0" step="0.5" placeholder="120">
+          <select id="bottleUnit">
+            <option value="ml">ml</option>
+            <option value="oz">oz</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label>Type</label>
+        <div class="choicebtns" id="bottleMilkChoice">
+          <button data-val="formula">Formula</button>
+          <button data-val="breast">Breast milk</button>
+          <button data-val="mixed">Mixed</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="bottleNote">Note (optional)</label>
+        <input type="text" id="bottleNote" maxlength="120" placeholder="e.g. spit up after">
+      </div>
+      <div class="err" id="bottleErr"></div>
+      <div class="btns">
+        <button id="bottleCancel">Cancel</button>
+        <button class="primary" id="bottleSave">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Diaper modal -->
+  <div class="overlay" id="diaperOverlay">
+    <div class="modal">
+      <h3>Log diaper</h3>
+      <div class="field">
+        <label for="diaperTime">Time</label>
+        <input type="time" id="diaperTime" step="60">
+      </div>
+      <div class="field">
+        <label>Kind</label>
+        <div class="choicebtns" id="diaperKindChoice">
+          <button data-val="wet">💧 Wet</button>
+          <button data-val="dirty">💩 Dirty</button>
+          <button data-val="both">Both</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="diaperNote">Note (optional)</label>
+        <input type="text" id="diaperNote" maxlength="120" placeholder="e.g. color, rash, leak">
+      </div>
+      <div class="err" id="diaperErr"></div>
+      <div class="btns">
+        <button id="diaperCancel">Cancel</button>
+        <button class="primary" id="diaperSave">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Solid modal -->
+  <div class="overlay" id="solidOverlay">
+    <div class="modal">
+      <h3>Log solids</h3>
+      <div class="field">
+        <label for="solidTime">Time</label>
+        <input type="time" id="solidTime" step="60">
+      </div>
+      <div class="field">
+        <label for="solidFood">What did they eat?</label>
+        <input type="text" id="solidFood" maxlength="120" placeholder="e.g. pureed carrots">
+      </div>
+      <div class="err" id="solidErr"></div>
+      <div class="btns">
+        <button id="solidCancel">Cancel</button>
+        <button class="primary" id="solidSave">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit modal (type-aware) -->
+  <div class="overlay" id="editOverlay">
+    <div class="modal">
+      <h3 id="editTitle">Edit entry</h3>
+      <div class="field">
+        <label for="editTime">Start time</label>
+        <input type="time" id="editTime" step="60">
+      </div>
+      <div class="field" id="editEndWrap">
+        <label for="editEndTime">End time</label>
+        <input type="time" id="editEndTime" step="60">
+      </div>
+      <div class="field" id="editSideWrap">
+        <label>Side</label>
+        <div class="choicebtns" id="editSideChoice">
+          <button data-val="L">Left</button>
+          <button data-val="R">Right</button>
+          <button data-val="both">Both</button>
+        </div>
+      </div>
+      <div class="field" id="editAmountWrap">
+        <label>Amount</label>
+        <div class="row2">
+          <input type="number" id="editAmount" inputmode="decimal" min="0" step="0.5">
+          <select id="editUnit">
+            <option value="ml">ml</option>
+            <option value="oz">oz</option>
+          </select>
+        </div>
+      </div>
+      <div class="field" id="editMilkWrap">
+        <label>Type</label>
+        <div class="choicebtns" id="editMilkChoice">
+          <button data-val="formula">Formula</button>
+          <button data-val="breast">Breast milk</button>
+          <button data-val="mixed">Mixed</button>
+        </div>
+      </div>
+      <div class="field" id="editKindWrap">
+        <label>Kind</label>
+        <div class="choicebtns" id="editKindChoice">
+          <button data-val="wet">💧 Wet</button>
+          <button data-val="dirty">💩 Dirty</button>
+          <button data-val="both">Both</button>
+        </div>
+      </div>
+      <div class="field" id="editFoodWrap">
+        <label for="editFood">What did they eat?</label>
+        <input type="text" id="editFood" maxlength="120">
+      </div>
+      <div class="field">
+        <label for="editNote">Note (optional)</label>
+        <input type="text" id="editNote" maxlength="120">
+      </div>
+      <div class="err" id="editErr"></div>
+      <div class="btns">
+        <button id="editCancel">Cancel</button>
+        <button class="primary" id="editSave">Save</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const STORAGE_KEY = 'babyLog_v1';
+  const ROOM_KEY = 'babySyncRoom_v1';
+  const SYNC_URL = 'https://baby-tracker-sync.davidsen908.workers.dev';
+  const POLL_MS = 4000;
+
+  let entries = [];              // all logged activity entries
+  let active = { sleep: null, nurse: null }; // in-progress timers: {start[, side]}
+  let tick = null;
+  let revision = 0;
+  let syncOk = null;
+
+  // ---- theme (per-device preference, not synced) ----
+  const themeBtn = document.getElementById('themeBtn');
+  function paintThemeBtn() {
+    themeBtn.textContent = document.documentElement.dataset.theme === 'light' ? '🌙' : '☀️';
+  }
+  themeBtn.addEventListener('click', () => {
+    const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem('btTheme', next); } catch(e) {}
+    paintThemeBtn();
+  });
+  paintThemeBtn();
+
+  // ---- sync room: taken from #r=... in the shared link, then remembered per device ----
+  const hashRoom = (location.hash.match(/r=([a-z0-9-]{8,64})/i) || [])[1];
+  if (hashRoom) { try { localStorage.setItem(ROOM_KEY, hashRoom.toLowerCase()); } catch(e) {} }
+  const room = hashRoom ? hashRoom.toLowerCase() : (localStorage.getItem(ROOM_KEY) || null);
+
+  // ---- persistence ----
+  function save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ revision, entries, active }));
+    } catch(e) { /* private mode / full storage - ignore */ }
+  }
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const data = JSON.parse(raw);
+        revision = data.revision || 0;
+        entries = data.entries || [];
+        active = data.active || { sleep: null, nurse: null };
+      }
+    } catch(e) { entries = []; }
+  }
+
+  // ---- cross-device sync (last write wins by revision) ----
+  function setSyncNote(state) {
+    const el = document.getElementById('syncNote');
+    if (!room) {
+      el.className = 'saved-note';
+      el.textContent = 'Saved to this device only — open the shared sync link to share the log.';
+    } else if (state === true) {
+      el.className = 'saved-note ok';
+      el.textContent = 'Synced across devices ✓';
+    } else if (state === false) {
+      el.className = 'saved-note warn';
+      el.textContent = 'Offline — saved on this device, will sync when connection returns.';
+    } else {
+      el.className = 'saved-note';
+      el.textContent = 'Connecting to sync…';
+    }
+  }
+
+  function pushState() {
+    if (!room) return;
+    fetch(`${SYNC_URL}/state/${room}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revision, entries, active }),
+    })
+      .then(r => { syncOk = r.ok; setSyncNote(syncOk); })
+      .catch(() => { syncOk = false; setSyncNote(false); });
+  }
+
+  function applyRemote(remote) {
+    revision = remote.revision;
+    entries = remote.entries || [];
+    active = remote.active || { sleep: null, nurse: null };
+    save();
+    updateActionUI();
+    render();
+  }
+
+  async function pull() {
+    if (!room) return;
+    try {
+      const res = await fetch(`${SYNC_URL}/state/${room}`, { cache: 'no-store' });
+      if (!res.ok) throw 0;
+      const remote = await res.json();
+      syncOk = true; setSyncNote(true);
+      if (remote && remote.revision > revision) applyRemote(remote);
+      else if (!remote || remote.revision < revision) pushState();
+    } catch(e) {
+      syncOk = false; setSyncNote(false);
+    }
+  }
+
+  function touch() {
+    revision = Date.now();
+    save();
+    pushState();
+  }
+
+  // ---- formatting helpers ----
+  function fmtShort(ms) {
+    const totalMin = Math.round(ms / 60000);
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    if (h > 0) return `${h}h ${m}m`;
+    if (totalMin > 0) return `${totalMin}m`;
+    return `${Math.round(ms/1000)}s`;
+  }
+  function fmtClock(ts) {
+    return new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+  }
+  function esc(s) {
+    return s.replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  }
+  function timeInputVal(ts) {
+    const d = new Date(ts);
+    return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
+  }
+  function applyTimeToDate(base, hhmm) {
+    const m = hhmm.trim().match(/^(\d{1,2})[:.](\d{2})$/);
+    if (!m || +m[1] > 23 || +m[2] > 59) return null;
+    const d = new Date(base);
+    d.setHours(+m[1], +m[2], d.getSeconds(), 0);
+    return d.getTime();
+  }
+  function sideLabel(s) { return s === 'L' ? 'Left' : s === 'R' ? 'Right' : 'Both sides'; }
+  function kindLabel(k) { return k === 'wet' ? 'Wet' : k === 'dirty' ? 'Dirty' : 'Wet + dirty'; }
+  function milkLabel(k) { return k === 'formula' ? 'Formula' : k === 'breast' ? 'Breast milk' : 'Mixed'; }
+
+  function entryIcon(e) {
+    if (e.type === 'sleep') return '😴';
+    if (e.type === 'nurse') return '🤱';
+    if (e.type === 'bottle') return '🍼';
+    if (e.type === 'solid') return '🥄';
+    if (e.type === 'diaper') return e.kind === 'wet' ? '💧' : e.kind === 'dirty' ? '💩' : '💧💩';
+    return '•';
+  }
+  function entryTypeLabel(e) {
+    if (e.type === 'sleep') return 'Sleep';
+    if (e.type === 'nurse') return 'Nurse';
+    if (e.type === 'bottle') return 'Bottle';
+    if (e.type === 'solid') return 'Solids';
+    if (e.type === 'diaper') return 'Diaper';
+    return e.type;
+  }
+  function entryDetail(e) {
+    if (e.type === 'sleep' || e.type === 'nurse') {
+      let d = fmtShort(e.duration);
+      if (e.type === 'nurse') d += ` · ${sideLabel(e.side)}`;
+      return d;
+    }
+    if (e.type === 'bottle') return `${e.amount}${e.unit}${e.milk ? ' · ' + milkLabel(e.milk) : ''}`;
+    if (e.type === 'diaper') return kindLabel(e.kind);
+    if (e.type === 'solid') return e.food || '';
+    return '';
+  }
+
+  // ---- stats / header ----
+  function latestFeedTime() {
+    let best = null;
+    for (const e of entries) {
+      if (e.type === 'nurse' || e.type === 'bottle' || e.type === 'solid') {
+        const t = e.end || e.start;
+        if (best === null || t > best) best = t;
+      }
+    }
+    return best;
+  }
+  function latestDiaperTime() {
+    let best = null;
+    for (const e of entries) if (e.type === 'diaper' && (best === null || e.start > best)) best = e.start;
+    return best;
+  }
+  function startOfToday() {
+    const d = new Date(); d.setHours(0,0,0,0); return d.getTime();
+  }
+  function updateStats() {
+    const now = Date.now();
+    const feedT = latestFeedTime();
+    document.getElementById('sinceFeed').textContent = active.nurse
+      ? `Nursing · ${fmtShort(now - active.nurse.start)}`
+      : (feedT ? fmtShort(now - feedT) + ' ago' : '—');
+
+    const diaperT = latestDiaperTime();
+    document.getElementById('sinceDiaper').textContent = diaperT ? fmtShort(now - diaperT) + ' ago' : '—';
+
+    const sleepLabel = document.getElementById('sleepLabel');
+    const sleepVal = document.getElementById('sleepVal');
+    if (active.sleep) {
+      sleepLabel.textContent = 'Asleep for';
+      sleepVal.textContent = fmtShort(now - active.sleep.start);
+      sleepVal.classList.add('active');
+    } else {
+      sleepVal.classList.remove('active');
+      const lastSleepEnd = entries.filter(e => e.type === 'sleep').map(e => e.end).sort((a,b)=>b-a)[0];
+      if (lastSleepEnd) {
+        sleepLabel.textContent = 'Awake for';
+        sleepVal.textContent = fmtShort(now - lastSleepEnd);
+      } else {
+        sleepLabel.textContent = 'Sleep';
+        sleepVal.textContent = '—';
+      }
+    }
+
+    const today0 = startOfToday();
+    const todays = entries.filter(e => e.start >= today0);
+    const feedCount = todays.filter(e => e.type === 'nurse' || e.type === 'bottle' || e.type === 'solid').length;
+    const diaperCount = todays.filter(e => e.type === 'diaper').length;
+    document.getElementById('todaySummary').textContent = `${feedCount} feed${feedCount===1?'':'s'} · ${diaperCount} diaper${diaperCount===1?'':'s'}`;
+  }
+
+  function render() {
+    updateStats();
+    const sorted = entries.slice().sort((a,b) => a.start - b.start);
+    if (sorted.length === 0) {
+      logList.innerHTML = '<li class="empty">Nothing logged yet.</li>';
+      return;
+    }
+    logList.innerHTML = '';
+    for (let i = sorted.length - 1; i >= 0; i--) {
+      const e = sorted[i];
+      const idx = entries.indexOf(e);
+      const li = document.createElement('li');
+      li.innerHTML = `<span class="ico">${entryIcon(e)}</span>
+                      <span class="main"><span class="type">${entryTypeLabel(e)}</span><span class="detail">${esc(entryDetail(e))}</span></span>
+                      <span class="time">${fmtClock(e.start)}</span>
+                      <span class="rowacts">
+                        <button class="rowbtn" data-edit="${idx}" aria-label="Edit">✎</button>
+                        <button class="rowbtn" data-del="${idx}" aria-label="Delete">✕</button>
+                      </span>${e.note ? `<span class="note">${esc(e.note)}</span>` : ''}`;
+      logList.appendChild(li);
+    }
+  }
+
+  const logList = document.getElementById('logList');
+  logList.addEventListener('click', (e) => {
+    const btn = e.target.closest('.rowbtn');
+    if (!btn) return;
+    if (btn.dataset.edit !== undefined) editRow(+btn.dataset.edit);
+    else if (btn.dataset.del !== undefined) deleteRow(+btn.dataset.del);
+  });
+
+  function deleteRow(i) {
+    const e = entries[i];
+    if (!e) return;
+    if (!confirm(`Delete this ${entryTypeLabel(e).toLowerCase()} entry from ${fmtClock(e.start)}?`)) return;
+    entries.splice(i, 1);
+    touch();
+    render();
+  }
+
+  // ---- start/stop timer buttons: sleep + nurse ----
+  const sleepBtn = document.getElementById('sleepBtn');
+  const sleepBtnSub = document.getElementById('sleepBtnSub');
+  const nurseBtn = document.getElementById('nurseBtn');
+  const nurseBtnSub = document.getElementById('nurseBtnSub');
+  const nurseSidePick = document.getElementById('nurseSidePick');
+  const NURSE_SIDE_KEY = 'btNurseSide';
+  let nurseSide = (function(){ try { return localStorage.getItem(NURSE_SIDE_KEY) || 'both'; } catch(e) { return 'both'; } })();
+
+  function paintNurseSide() {
+    nurseSidePick.querySelectorAll('button').forEach(b => b.classList.toggle('sel', b.dataset.side === nurseSide));
+  }
+  nurseSidePick.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    nurseSide = b.dataset.side;
+    try { localStorage.setItem(NURSE_SIDE_KEY, nurseSide); } catch(err) {}
+    if (active.nurse) { active.nurse.side = nurseSide; touch(); }
+    paintNurseSide();
+  });
+
+  function updateActionUI() {
+    if (active.sleep) {
+      sleepBtn.classList.add('running');
+      sleepBtnSub.textContent = 'Tap to wake';
+    } else {
+      sleepBtn.classList.remove('running');
+      sleepBtnSub.textContent = 'Tap to start';
+    }
+    if (active.nurse) {
+      nurseBtn.classList.add('running');
+      nurseBtnSub.textContent = 'Tap to stop';
+      nurseSidePick.style.display = 'flex';
+      nurseSide = active.nurse.side;
+    } else {
+      nurseBtn.classList.remove('running');
+      nurseBtnSub.textContent = 'Tap to start';
+      nurseSidePick.style.display = 'none';
+    }
+    paintNurseSide();
+    if ((active.sleep || active.nurse) && !tick) startTick();
+    if (!active.sleep && !active.nurse && tick) { clearInterval(tick); tick = null; }
+  }
+  function startTick() {
+    tick = setInterval(() => {
+      const now = Date.now();
+      if (active.sleep) sleepBtnSub.textContent = `${fmtShort(now - active.sleep.start)} · tap to wake`;
+      if (active.nurse) nurseBtnSub.textContent = `${fmtShort(now - active.nurse.start)} · tap to stop`;
+      updateStats();
+    }, 1000);
+  }
+
+  sleepBtn.addEventListener('click', () => {
+    if (!active.sleep) {
+      active.sleep = { start: Date.now() };
+    } else {
+      const end = Date.now();
+      entries.push({ id: 's'+active.sleep.start, type: 'sleep', start: active.sleep.start, end, duration: end - active.sleep.start });
+      active.sleep = null;
+      render();
+    }
+    updateActionUI();
+    touch();
+  });
+
+  nurseBtn.addEventListener('click', () => {
+    if (!active.nurse) {
+      active.nurse = { start: Date.now(), side: nurseSide };
+    } else {
+      const end = Date.now();
+      entries.push({ id: 'n'+active.nurse.start, type: 'nurse', start: active.nurse.start, end, duration: end - active.nurse.start, side: active.nurse.side });
+      active.nurse = null;
+      render();
+    }
+    updateActionUI();
+    touch();
+  });
+
+  // ---- quick-log modals: bottle / diaper / solid ----
+  function openOverlay(id) { document.getElementById(id).classList.add('open'); }
+  function closeOverlay(id) { document.getElementById(id).classList.remove('open'); }
+  function choiceSetup(containerId, defaultVal) {
+    const el = document.getElementById(containerId);
+    let val = defaultVal;
+    el.querySelectorAll('button').forEach(b => {
+      b.classList.toggle('sel', b.dataset.val === val);
+      b.onclick = () => { val = b.dataset.val; el.querySelectorAll('button').forEach(x => x.classList.toggle('sel', x === b)); };
+    });
+    return { get: () => val };
+  }
+  function showErr(id, msg) { const el = document.getElementById(id); el.textContent = msg; el.style.display = 'block'; }
+  function hideErr(id) { document.getElementById(id).style.display = 'none'; }
+
+  // Bottle
+  const bottleMilk = choiceSetup('bottleMilkChoice', 'formula');
+  document.getElementById('bottleBtn').addEventListener('click', () => {
+    document.getElementById('bottleTime').value = timeInputVal(Date.now());
+    document.getElementById('bottleAmount').value = '';
+    document.getElementById('bottleNote').value = '';
+    hideErr('bottleErr');
+    openOverlay('bottleOverlay');
+  });
+  document.getElementById('bottleCancel').addEventListener('click', () => closeOverlay('bottleOverlay'));
+  document.getElementById('bottleOverlay').addEventListener('click', (e) => { if (e.target.id === 'bottleOverlay') closeOverlay('bottleOverlay'); });
+  document.getElementById('bottleSave').addEventListener('click', () => {
+    const amount = parseFloat(document.getElementById('bottleAmount').value);
+    if (!amount || amount <= 0) { showErr('bottleErr', 'Enter an amount greater than 0'); return; }
+    const start = applyTimeToDate(Date.now(), document.getElementById('bottleTime').value);
+    if (start === null) { showErr('bottleErr', 'Time must be HH:MM'); return; }
+    const note = document.getElementById('bottleNote').value.trim();
+    entries.push({ id: 'b'+Date.now(), type: 'bottle', start, amount, unit: document.getElementById('bottleUnit').value, milk: bottleMilk.get(), note: note || undefined });
+    touch(); render();
+    closeOverlay('bottleOverlay');
+  });
+
+  // Diaper
+  const diaperKind = choiceSetup('diaperKindChoice', 'wet');
+  document.getElementById('diaperBtn').addEventListener('click', () => {
+    document.getElementById('diaperTime').value = timeInputVal(Date.now());
+    document.getElementById('diaperNote').value = '';
+    hideErr('diaperErr');
+    openOverlay('diaperOverlay');
+  });
+  document.getElementById('diaperCancel').addEventListener('click', () => closeOverlay('diaperOverlay'));
+  document.getElementById('diaperOverlay').addEventListener('click', (e) => { if (e.target.id === 'diaperOverlay') closeOverlay('diaperOverlay'); });
+  document.getElementById('diaperSave').addEventListener('click', () => {
+    const start = applyTimeToDate(Date.now(), document.getElementById('diaperTime').value);
+    if (start === null) { showErr('diaperErr', 'Time must be HH:MM'); return; }
+    const note = document.getElementById('diaperNote').value.trim();
+    entries.push({ id: 'd'+Date.now(), type: 'diaper', start, kind: diaperKind.get(), note: note || undefined });
+    touch(); render();
+    closeOverlay('diaperOverlay');
+  });
+
+  // Solid
+  document.getElementById('solidBtn').addEventListener('click', () => {
+    document.getElementById('solidTime').value = timeInputVal(Date.now());
+    document.getElementById('solidFood').value = '';
+    hideErr('solidErr');
+    openOverlay('solidOverlay');
+  });
+  document.getElementById('solidCancel').addEventListener('click', () => closeOverlay('solidOverlay'));
+  document.getElementById('solidOverlay').addEventListener('click', (e) => { if (e.target.id === 'solidOverlay') closeOverlay('solidOverlay'); });
+  document.getElementById('solidSave').addEventListener('click', () => {
+    const food = document.getElementById('solidFood').value.trim();
+    if (!food) { showErr('solidErr', 'Enter what they ate'); return; }
+    const start = applyTimeToDate(Date.now(), document.getElementById('solidTime').value);
+    if (start === null) { showErr('solidErr', 'Time must be HH:MM'); return; }
+    entries.push({ id: 'f'+Date.now(), type: 'solid', start, food });
+    touch(); render();
+    closeOverlay('solidOverlay');
+  });
+
+  // ---- edit modal (type-aware) ----
+  const editOverlay = document.getElementById('editOverlay');
+  const editTime = document.getElementById('editTime');
+  const editEndTime = document.getElementById('editEndTime');
+  const editNote = document.getElementById('editNote');
+  const editAmount = document.getElementById('editAmount');
+  const editUnit = document.getElementById('editUnit');
+  const editFood = document.getElementById('editFood');
+  let editIdx = null;
+  let editSide = null, editMilk = null, editKind = null;
+
+  const wraps = ['editEndWrap','editSideWrap','editAmountWrap','editMilkWrap','editKindWrap','editFoodWrap'];
+  function showWraps(ids) {
+    wraps.forEach(id => document.getElementById(id).style.display = ids.includes(id) ? 'block' : 'none');
+  }
+  function setChoiceSel(containerId, val) {
+    document.getElementById(containerId).querySelectorAll('button').forEach(b => b.classList.toggle('sel', b.dataset.val === val));
+  }
+  document.getElementById('editSideChoice').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { editSide = b.dataset.val; setChoiceSel('editSideChoice', editSide); } });
+  document.getElementById('editMilkChoice').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { editMilk = b.dataset.val; setChoiceSel('editMilkChoice', editMilk); } });
+  document.getElementById('editKindChoice').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { editKind = b.dataset.val; setChoiceSel('editKindChoice', editKind); } });
+
+  function editRow(i) {
+    const e = entries[i];
+    if (!e) return;
+    editIdx = i;
+    document.getElementById('editTitle').textContent = `Edit ${entryTypeLabel(e).toLowerCase()}`;
+    editTime.value = timeInputVal(e.start);
+    editNote.value = e.note || '';
+    hideErr('editErr');
+
+    if (e.type === 'sleep' || e.type === 'nurse') {
+      editEndTime.value = timeInputVal(e.end);
+      if (e.type === 'nurse') { editSide = e.side; setChoiceSel('editSideChoice', editSide); showWraps(['editEndWrap','editSideWrap']); }
+      else showWraps(['editEndWrap']);
+    } else if (e.type === 'bottle') {
+      editAmount.value = e.amount; editUnit.value = e.unit; editMilk = e.milk || 'formula'; setChoiceSel('editMilkChoice', editMilk);
+      showWraps(['editAmountWrap','editMilkWrap']);
+    } else if (e.type === 'diaper') {
+      editKind = e.kind; setChoiceSel('editKindChoice', editKind);
+      showWraps(['editKindWrap']);
+    } else if (e.type === 'solid') {
+      editFood.value = e.food || '';
+      showWraps(['editFoodWrap']);
+    } else {
+      showWraps([]);
+    }
+    editOverlay.classList.add('open');
+  }
+  function closeEdit() { editOverlay.classList.remove('open'); editIdx = null; }
+  document.getElementById('editCancel').addEventListener('click', closeEdit);
+  editOverlay.addEventListener('click', (e) => { if (e.target === editOverlay) closeEdit(); });
+  document.getElementById('editSave').addEventListener('click', () => {
+    const e = entries[editIdx];
+    if (!e) { closeEdit(); return; }
+    const newStart = applyTimeToDate(e.start, editTime.value);
+    if (newStart === null) { showErr('editErr', 'Start time must be HH:MM'); return; }
+    e.start = newStart;
+
+    if (e.type === 'sleep' || e.type === 'nurse') {
+      let newEnd = applyTimeToDate(e.end, editEndTime.value);
+      if (newEnd === null) { showErr('editErr', 'End time must be HH:MM'); return; }
+      if (newEnd < e.start) newEnd += 24*3600000; // crossed midnight
+      if (newEnd <= e.start) { showErr('editErr', 'End time must be after start'); return; }
+      e.end = newEnd;
+      e.duration = e.end - e.start;
+      if (e.type === 'nurse') e.side = editSide;
+    } else if (e.type === 'bottle') {
+      const amt = parseFloat(editAmount.value);
+      if (!amt || amt <= 0) { showErr('editErr', 'Enter an amount greater than 0'); return; }
+      e.amount = amt; e.unit = editUnit.value; e.milk = editMilk;
+    } else if (e.type === 'diaper') {
+      e.kind = editKind;
+    } else if (e.type === 'solid') {
+      const food = editFood.value.trim();
+      if (!food) { showErr('editErr', 'Enter what they ate'); return; }
+      e.food = food;
+    }
+    const note = editNote.value.trim();
+    if (note) e.note = note; else delete e.note;
+    touch();
+    render();
+    closeEdit();
+  });
+
+  // ---- init: restore state, then sync ----
+  load();
+  updateActionUI();
+  render();
+  setSyncNote(syncOk);
+  pull();
+  setInterval(pull, POLL_MS);
+  setInterval(updateStats, 15000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) pull(); });
+  window.addEventListener('online', pull);
+</script>
+</body>
+</html>
