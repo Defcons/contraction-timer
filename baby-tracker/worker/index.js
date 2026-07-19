@@ -1,11 +1,15 @@
 // Baby tracker sync worker — stores one JSON state blob per room in KV,
 // plus web push subscriptions and a cron that evaluates alert rules.
-// GET  /state/:room        -> stored JSON or null
-// PUT  /state/:room        -> store JSON body (last write wins by client revision)
-// POST /subscribe/:room    -> store a push subscription for this room
-// POST /unsubscribe/:room  -> remove a push subscription ({endpoint})
-// POST /test/:room         -> send a test notification to all of the room's devices
-// KV: room:<id> = state, sub:<id>:<hash> = subscription, alerted:<id> = {rule: lastFiredTs}
+// GET  /state/:room           -> stored JSON or null
+// PUT  /state/:room           -> store JSON body (clients merge; last PUT wins per blob)
+// POST /subscribe/:room       -> store a push subscription for this room
+// POST /unsubscribe/:room     -> remove a push subscription ({endpoint})
+// POST /test/:room            -> send a test notification to all of the room's devices
+// GET  /archive/:room         -> { months: ["2026-07", ...] }
+// GET  /archive/:room/:month  -> archived entries for that month
+// KV: room:<id> = hot state, sub:<id>:<hash> = subscription,
+//     alerted:<id> = {rule: lastFiredTs}, archive:<id>:<YYYY-MM> = old entries,
+//     backup:<id>:<YYYY-MM-DD> = daily snapshots (14 kept), maint:last = date gate
 
 import { sendPush } from './webpush.js';
 
@@ -58,6 +62,24 @@ function fmtDur(ms) {
   return h > 0 ? `${h}h ${String(m % 60).padStart(2, '0')}m` : `${m}m`;
 }
 
+// Quiet hours: shared config window (in the family's own timezone) during
+// which nothing is sent; conditions still holding fire once the window ends.
+export function inQuietHours(alerts, date) {
+  const q = alerts && alerts.quiet;
+  if (!q || !q.on) return false;
+  let cur;
+  try {
+    cur = date.toLocaleTimeString('en-GB', { timeZone: q.tz || 'UTC', hour12: false, hour: '2-digit', minute: '2-digit' });
+  } catch { return false; }
+  const from = q.from || '22:00', to = q.to || '07:00';
+  return from <= to ? cur >= from && cur < to : cur >= from || cur < to;
+}
+
+// Guardrails for forgotten start/stop timers: a stuck timer silently
+// suppresses the feed/awake alerts, so nag about it directly.
+const NURSE_TIMER_MS = 2 * 3600000;
+const SLEEP_TIMER_MS = 14 * 3600000;
+
 // Mirrors the client's stats logic. Rules with no matching entry ever logged
 // stay silent (avoids an alert storm on an empty log).
 export function dueAlerts(state, now) {
@@ -76,6 +98,10 @@ export function dueAlerts(state, now) {
   { const t = last(['diaper']); if (over(t, a.diaper)) due.push({ key: 'diaper', crit: crit(a.diaper), body: `💧 No diaper change for ${fmtDur(now - t)}` }); }
   if (!active.sleep) { const t = last(['sleep']); if (over(t, a.awake)) due.push({ key: 'awake', crit: crit(a.awake), body: `☀️ Awake for ${fmtDur(now - t)}` }); }
   if (active.sleep) { const t = active.sleep.start; if (over(t, a.sleep)) due.push({ key: 'sleep', crit: crit(a.sleep), body: `😴 Asleep for ${fmtDur(now - t)}` }); }
+  if (active.nurse && now - active.nurse.start > NURSE_TIMER_MS)
+    due.push({ key: 'nursetimer', crit: 'normal', body: `🤱 Nurse timer has been running ${fmtDur(now - active.nurse.start)} — forgot to stop it?` });
+  if (active.sleep && now - active.sleep.start > SLEEP_TIMER_MS)
+    due.push({ key: 'sleeptimer', crit: 'normal', body: `😴 Sleep timer has been running ${fmtDur(now - active.sleep.start)} — forgot to stop it?` });
   return due;
 }
 
@@ -97,14 +123,63 @@ async function checkAlerts(env) {
     for (const k of Object.keys(alerted)) {
       if (!dueKeys.has(k)) { delete alerted[k]; changed = true; } // condition reset -> next crossing alerts immediately
     }
-    for (const d of due) {
-      const repeat = REPEAT_MS[d.crit] ?? REPEAT_MS.normal;
-      if (alerted[d.key] && (repeat === null || now - alerted[d.key] < repeat)) continue;
-      await pushRoom(env, room, { title: 'Baby Tracker', body: d.body, tag: 'bt-' + d.key, crit: d.crit });
-      alerted[d.key] = now;
-      changed = true;
+    if (!inQuietHours(state.alerts, new Date(now))) {
+      for (const d of due) {
+        const repeat = REPEAT_MS[d.crit] ?? REPEAT_MS.normal;
+        if (alerted[d.key] && (repeat === null || now - alerted[d.key] < repeat)) continue;
+        await pushRoom(env, room, { title: 'Baby Tracker', body: d.body, tag: 'bt-' + d.key, crit: d.crit });
+        alerted[d.key] = now;
+        changed = true;
+      }
     }
     if (changed) await env.STATE.put(alertedKey, JSON.stringify(alerted));
+  }
+}
+
+// Daily (gated by maint:last) per-room housekeeping:
+// 1. snapshot the hot state to backup:<room>:<date>, keep 14 days
+// 2. move entries older than 35 days into monthly archive keys and set the
+//    archivedBefore watermark so clients drop them from their hot copies
+const HOT_DAYS = 35;
+const BACKUP_KEEP_DAYS = 14;
+
+async function dailyMaintenance(env) {
+  const today = new Date().toISOString().slice(0, 10);
+  if ((await env.STATE.get('maint:last')) === today) return;
+  await env.STATE.put('maint:last', today); // claim before working: at most one run/day
+  const now = Date.now();
+  const cut = now - HOT_DAYS * 86400000;
+  const backupCut = new Date(now - BACKUP_KEEP_DAYS * 86400000).toISOString().slice(0, 10);
+  const rooms = (await env.STATE.list({ prefix: 'room:' })).keys.map((k) => k.name.slice(5));
+  for (const room of rooms) {
+    const raw = await env.STATE.get('room:' + room);
+    if (!raw) continue;
+    await env.STATE.put(`backup:${room}:${today}`, raw);
+    const backups = await env.STATE.list({ prefix: `backup:${room}:` });
+    for (const k of backups.keys) {
+      if (k.name.split(':')[2] < backupCut) await env.STATE.delete(k.name);
+    }
+    let s;
+    try { s = JSON.parse(raw); } catch { continue; }
+    const entries = s.entries || [];
+    const old = entries.filter((e) => e.start < cut);
+    if (!old.length) continue;
+    const byMonth = {};
+    for (const e of old) (byMonth[new Date(e.start).toISOString().slice(0, 7)] ||= []).push(e);
+    for (const [mon, list] of Object.entries(byMonth)) {
+      const akey = `archive:${room}:${mon}`;
+      let arch = [];
+      try { arch = JSON.parse((await env.STATE.get(akey)) || '[]'); } catch {}
+      const ids = new Set(arch.map((e) => e.id));
+      for (const e of list) if (!ids.has(e.id)) arch.push(e);
+      arch.sort((x, y) => x.start - y.start);
+      await env.STATE.put(akey, JSON.stringify(arch));
+    }
+    s.entries = entries.filter((e) => e.start >= cut);
+    s.archivedBefore = Math.max(s.archivedBefore || 0, cut);
+    if (s.deleted) for (const id of Object.keys(s.deleted)) if (s.deleted[id] < cut) delete s.deleted[id];
+    s.revision = now;
+    await env.STATE.put('room:' + room, JSON.stringify(s));
   }
 }
 
@@ -113,11 +188,22 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
 
     const url = new URL(req.url);
-    const m = url.pathname.match(/^\/(state|subscribe|unsubscribe|test)\/([a-z0-9-]{8,64})$/i);
+    const m = url.pathname.match(/^\/(state|subscribe|unsubscribe|test|archive)\/([a-z0-9-]{8,64})(?:\/(\d{4}-\d{2}))?$/i);
     if (!m) return new Response('not found', { status: 404, headers: CORS });
-    const [, action, roomRaw] = m;
+    const [, action, roomRaw, month] = m;
     const room = roomRaw.toLowerCase();
     const key = 'room:' + room;
+
+    if (action === 'archive' && req.method === 'GET') {
+      if (!month) {
+        const list = await env.STATE.list({ prefix: `archive:${room}:` });
+        return json({ months: list.keys.map((k) => k.name.split(':')[2]).sort() });
+      }
+      const val = await env.STATE.get(`archive:${room}:${month}`);
+      return new Response(val || '[]', {
+        headers: { ...CORS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      });
+    }
 
     if (action === 'state' && req.method === 'GET') {
       const val = await env.STATE.get(key);
@@ -175,6 +261,6 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(checkAlerts(env));
+    ctx.waitUntil(Promise.all([checkAlerts(env), dailyMaintenance(env)]));
   },
 };

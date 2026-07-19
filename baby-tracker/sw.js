@@ -1,26 +1,30 @@
 // Service worker: web push notifications + minimal offline fallback.
-const CACHE = 'bt-v1';
+const CACHE = 'bt-v2';
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['./', './icon-192.png'])));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['./', './sync.js', './icon-192.png'])));
   self.skipWaiting();
 });
 self.addEventListener('activate', (e) => {
-  e.waitUntil(clients.claim());
+  e.waitUntil(caches.keys().then((keys) =>
+    Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
+  ).then(() => clients.claim()));
 });
 
-// Network-first for navigations so deploys land normally; cache is only an
-// offline fallback.
+// Network-first for same-origin GETs so deploys land normally; the cache is
+// only an offline fallback (sync API calls are cross-origin and untouched).
 self.addEventListener('fetch', (e) => {
-  if (e.request.mode !== 'navigate') return;
+  const url = new URL(e.request.url);
+  if (e.request.method !== 'GET' || url.origin !== location.origin) return;
   e.respondWith(
     fetch(e.request)
       .then((res) => {
         const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put('./', copy));
+        caches.open(CACHE).then((c) => c.put(e.request, copy));
         return res;
       })
-      .catch(() => caches.match('./'))
+      .catch(() => caches.match(e.request, { ignoreSearch: true })
+        .then((r) => r || (e.request.mode === 'navigate' ? caches.match('./') : Response.error())))
   );
 });
 

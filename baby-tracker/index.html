@@ -252,6 +252,26 @@
   .tlbar.bottle, .tldot.bottle { background: var(--warn); }
   .tldot.diaper { background: #55a0a0; }
   .tldot.solid { background: var(--ok); }
+  .tldot.med { background: #9a6fc0; }
+  .tldot.pump { background: #5f8fbf; }
+  .tldot.health { background: #bf7d5f; }
+
+  /* daily history table */
+  .hist { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 6px 12px; font-size: 13px; }
+  .histrow { display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr 1fr; gap: 6px; padding: 7px 0; border-bottom: 1px solid var(--border2); align-items: baseline; }
+  .histrow:last-child { border-bottom: none; }
+  .histrow.head { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .histrow .day { color: var(--soft); }
+  .histbtns { display: flex; justify-content: flex-end; margin-top: 8px; }
+  .histbtns button {
+    padding: 8px 14px; font-size: 12px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--card); color: var(--soft);
+  }
+  .showmore { text-align: center; padding: 10px 0 2px; }
+  .showmore button {
+    padding: 8px 18px; font-size: 12px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--card); color: var(--soft);
+  }
 </style>
 <script>document.documentElement.dataset.theme = (function(){ try { return localStorage.getItem('btTheme') || 'dark'; } catch(e) { return 'dark'; } })();</script>
 </head>
@@ -305,9 +325,21 @@
       <span class="ico">💧</span>Diaper
       <span class="sub2" id="diaperBtnSub">Wet / dirty</span>
     </button>
-    <button class="actionbtn wide" id="solidBtn">
+    <button class="actionbtn" id="pumpBtn">
+      <span class="ico">🥛</span>Pump
+      <span class="sub2" id="pumpBtnSub">Amount &amp; side</span>
+    </button>
+    <button class="actionbtn" id="solidBtn">
       <span class="ico">🥄</span>Solids
       <span class="sub2" id="solidBtnSub">What &amp; when</span>
+    </button>
+    <button class="actionbtn" id="medBtn">
+      <span class="ico">💊</span>Meds
+      <span class="sub2" id="medBtnSub">Vitamins etc.</span>
+    </button>
+    <button class="actionbtn" id="healthBtn">
+      <span class="ico">🌡️</span>Health
+      <span class="sub2" id="healthBtnSub">Temp / growth</span>
     </button>
   </div>
   <div class="sidepick" id="nurseSidePick" style="display:none;">
@@ -323,6 +355,10 @@
   <ul class="log" id="logList">
     <li class="empty">Nothing logged yet.</li>
   </ul>
+
+  <h2>Daily history</h2>
+  <div class="hist" id="history"></div>
+  <div class="histbtns"><button id="csvBtn">Export CSV</button></div>
 
   <div class="saved-note" id="syncNote">Saved automatically to this device.</div>
 
@@ -347,6 +383,7 @@
       <h3>Alerts &amp; notifications</h3>
       <div class="field">
         <label>This device</label>
+        <input type="text" id="deviceName" maxlength="16" placeholder="Who logs from here? e.g. Grandma" style="margin-bottom:8px;">
         <div class="pushstatus" id="pushStatus">Checking…</div>
         <div class="btns" style="margin-top:10px;">
           <button class="primary" id="pushToggle">Enable notifications</button>
@@ -359,7 +396,8 @@
         <div class="alertrow"><input type="checkbox" id="alDiaperOn"><span>💧 No diaper for</span><select id="alDiaperMin"></select><select id="alDiaperCrit" title="How loud"></select></div>
         <div class="alertrow"><input type="checkbox" id="alAwakeOn"><span>☀️ Awake for</span><select id="alAwakeMin"></select><select id="alAwakeCrit" title="How loud"></select></div>
         <div class="alertrow"><input type="checkbox" id="alSleepOn"><span>😴 Asleep for</span><select id="alSleepMin"></select><select id="alSleepCrit" title="How loud"></select></div>
-        <div class="pushstatus" style="margin-top:6px;">Quiet = silent, once. Normal = sound, repeats every 30 min. Nag = sound, repeats every 10 min until logged.</div>
+        <div class="alertrow"><input type="checkbox" id="alQuietOn"><span>🌙 Quiet hours</span><select id="alQuietFrom"></select><select id="alQuietTo"></select></div>
+        <div class="pushstatus" style="margin-top:6px;">Quiet = silent, once. Normal = sound, repeats every 30 min. Nag = sound, repeats every 10 min until logged. During quiet hours nothing is sent; pending alerts arrive when they end.</div>
       </div>
       <div class="btns">
         <button id="alertsClose">Close</button>
@@ -504,6 +542,96 @@
     </div>
   </div>
 
+  <!-- Pump modal -->
+  <div class="overlay" id="pumpOverlay">
+    <div class="modal">
+      <h3>Log pumping</h3>
+      <div class="field">
+        <label for="pumpTime">Time</label>
+        <input type="time" id="pumpTime" step="60">
+      </div>
+      <div class="field">
+        <label>Amount</label>
+        <div class="row2">
+          <input type="number" id="pumpAmount" inputmode="decimal" min="0" step="0.5" placeholder="80">
+          <select id="pumpUnit">
+            <option value="ml">ml</option>
+            <option value="oz">oz</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label>Side</label>
+        <div class="choicebtns" id="pumpSideChoice">
+          <button data-val="L">Left</button>
+          <button data-val="R">Right</button>
+          <button data-val="both">Both</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="pumpNote">Note (optional)</label>
+        <input type="text" id="pumpNote" maxlength="120">
+      </div>
+      <div class="err" id="pumpErr"></div>
+      <div class="btns">
+        <button id="pumpCancel">Cancel</button>
+        <button class="primary" id="pumpSave">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Meds modal -->
+  <div class="overlay" id="medOverlay">
+    <div class="modal">
+      <h3>Log medicine</h3>
+      <div class="field">
+        <label for="medTime">Time</label>
+        <input type="time" id="medTime" step="60">
+      </div>
+      <div class="field">
+        <label for="medName">What</label>
+        <input type="text" id="medName" maxlength="60" placeholder="e.g. Vitamin D drops">
+      </div>
+      <div class="field">
+        <label for="medNote">Note (optional)</label>
+        <input type="text" id="medNote" maxlength="120">
+      </div>
+      <div class="err" id="medErr"></div>
+      <div class="btns">
+        <button id="medCancel">Cancel</button>
+        <button class="primary" id="medSave">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Health modal (temperature / weight / length) -->
+  <div class="overlay" id="healthOverlay">
+    <div class="modal">
+      <h3>Log health</h3>
+      <div class="field">
+        <label for="healthTime">Time</label>
+        <input type="time" id="healthTime" step="60">
+      </div>
+      <div class="field">
+        <label>Measurements (fill any)</label>
+        <div class="row2">
+          <input type="number" id="healthTemp" inputmode="decimal" step="0.1" placeholder="°C">
+          <input type="number" id="healthWeight" inputmode="decimal" step="0.01" placeholder="kg">
+          <input type="number" id="healthLength" inputmode="decimal" step="0.5" placeholder="cm">
+        </div>
+      </div>
+      <div class="field">
+        <label for="healthNote">Note (optional)</label>
+        <input type="text" id="healthNote" maxlength="120">
+      </div>
+      <div class="err" id="healthErr"></div>
+      <div class="btns">
+        <button id="healthCancel">Cancel</button>
+        <button class="primary" id="healthSave">Save</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Edit modal (type-aware) -->
   <div class="overlay" id="editOverlay">
     <div class="modal">
@@ -554,6 +682,18 @@
         <label for="editFood">What did they eat?</label>
         <input type="text" id="editFood" maxlength="120">
       </div>
+      <div class="field" id="editMedWrap">
+        <label for="editMedName">What</label>
+        <input type="text" id="editMedName" maxlength="60">
+      </div>
+      <div class="field" id="editHealthWrap">
+        <label>Measurements (°C / kg / cm)</label>
+        <div class="row2">
+          <input type="number" id="editHealthTemp" inputmode="decimal" step="0.1" placeholder="°C">
+          <input type="number" id="editHealthWeight" inputmode="decimal" step="0.01" placeholder="kg">
+          <input type="number" id="editHealthLength" inputmode="decimal" step="0.5" placeholder="cm">
+        </div>
+      </div>
       <div class="field">
         <label for="editNote">Note (optional)</label>
         <input type="text" id="editNote" maxlength="120">
@@ -566,6 +706,7 @@
     </div>
   </div>
 
+<script src="sync.js"></script>
 <script>
   const STORAGE_KEY = 'babyLog_v1';
   const AUTH_KEY = 'babyAuthRoom_v1';
@@ -573,7 +714,8 @@
   // so it never appears in this (public) repo
   const PASS_SHA256 = '766724e2275657b656fcc8f94ecacadff3a798689303c5aa4d0e579ced7066b9';
   const SYNC_URL = 'https://baby-tracker-sync.davidsen908.workers.dev';
-  const POLL_MS = 4000;
+  const POLL_MS = 10000; // keep well inside Workers/KV free-tier daily quotas
+  const NAME_KEY = 'btDeviceName_v1'; // per-device "who logs from here"
   const VAPID_PUBLIC = 'BEhnWFpfkQFW6KpxWhLtJOhj6I8TH4O0Nf9YuS4Ai-cHY0Q5BLB0YYhxyZECd0c6TNQuBhoze8BqXjTuAO3QAWY';
   const PUSH_FLAG = 'btPushOn_v1'; // per-device: user enabled notifications here
 
@@ -583,12 +725,17 @@
       diaper: { on: false, min: 240, crit: 'normal' },
       awake:  { on: false, min: 120, crit: 'normal' },
       sleep:  { on: false, min: 180, crit: 'normal' },
+      quiet:  { on: false, from: '22:00', to: '07:00', tz: Intl.DateTimeFormat().resolvedOptions().timeZone },
     };
   }
 
-  let entries = [];              // all logged activity entries
-  let active = { sleep: null, nurse: null }; // in-progress timers: {start[, side]}
+  let entries = [];              // hot-window entries (older ones live in server archives)
+  let active = { sleep: null, nurse: null }; // in-progress timers: {start, mt[, side]}
   let alerts = defaultAlerts();  // shared alert rules (synced; evaluated by the worker cron)
+  let alertsRev = 0;             // last-modified ts of alerts (merge tiebreaker)
+  let deleted = {};              // tombstones {entryId: deleteTs} so deletes survive merges
+  let archivedBefore = 0;        // server watermark: entries older than this are archived
+  let deviceName = (function(){ try { return localStorage.getItem(NAME_KEY) || ''; } catch(e) { return ''; } })();
   let tick = null;
   let revision = 0;
   let syncOk = null;
@@ -632,21 +779,27 @@
   loginPass.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
 
   // ---- persistence ----
+  function currentState() {
+    return { revision, entries, active, alerts, alertsRev, deleted, archivedBefore };
+  }
+  function adopt(s) {
+    revision = s.revision;
+    entries = s.entries;
+    active = s.active;
+    alerts = s.alerts || defaultAlerts();
+    alertsRev = s.alertsRev;
+    deleted = s.deleted;
+    archivedBefore = s.archivedBefore;
+  }
   function save() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ revision, entries, active, alerts }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(currentState()));
     } catch(e) { /* private mode / full storage - ignore */ }
   }
   function load() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const data = JSON.parse(raw);
-        revision = data.revision || 0;
-        entries = data.entries || [];
-        active = data.active || { sleep: null, nurse: null };
-        alerts = data.alerts || defaultAlerts();
-      }
+      if (raw) adopt(normalizeState(JSON.parse(raw)));
     } catch(e) { entries = []; }
   }
 
@@ -673,23 +826,14 @@
     fetch(`${SYNC_URL}/state/${room}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ revision, entries, active, alerts }),
+      body: JSON.stringify(currentState()),
     })
       .then(r => { syncOk = r.ok; setSyncNote(syncOk); })
       .catch(() => { syncOk = false; setSyncNote(false); });
   }
 
-  function applyRemote(remote) {
-    revision = remote.revision;
-    entries = remote.entries || [];
-    active = remote.active || { sleep: null, nurse: null };
-    alerts = remote.alerts || defaultAlerts();
-    save();
-    updateActionUI();
-    paintAlertRules();
-    render();
-  }
-
+  // Entry-level merge sync: local and remote are unioned per entry (tombstones
+  // for deletes), so concurrent logging on several devices never loses a tap.
   async function pull() {
     if (!room) return;
     try {
@@ -697,8 +841,19 @@
       if (!res.ok) throw 0;
       const remote = await res.json();
       syncOk = true; setSyncNote(true);
-      if (remote && remote.revision > revision) applyRemote(remote);
-      else if (!remote || remote.revision < revision) pushState();
+      if (!remote) { pushState(); return; }
+      const merged = mergeState(currentState(), remote);
+      const sig = stateSig(merged);
+      const changedLocal = sig !== stateSig(currentState());
+      const changedRemote = sig !== stateSig(remote);
+      if (changedLocal) {
+        adopt(merged);
+        save();
+        updateActionUI();
+        paintAlertRules();
+        render();
+      }
+      if (changedRemote) { revision = Date.now(); save(); pushState(); }
     } catch(e) {
       syncOk = false; setSyncNote(false);
     }
@@ -708,6 +863,15 @@
     revision = Date.now();
     save();
     pushState();
+  }
+  function bumpAlerts() { // any change to the shared alert config
+    alertsRev = Date.now();
+    touch();
+  }
+  function stamp(entry) { // creation metadata: modified-ts + who logged it
+    entry.mt = Date.now();
+    if (deviceName) entry.by = deviceName;
+    return entry;
   }
 
   // ---- formatting helpers ----
@@ -736,6 +900,13 @@
     d.setHours(+m[1], +m[2], d.getSeconds(), 0);
     return d.getTime();
   }
+  // Quick-log modals take a time-of-day assumed "today" — around midnight a
+  // just-before-midnight time would land in the future; treat it as yesterday.
+  function applyTimeBack(hhmm) {
+    const t = applyTimeToDate(Date.now(), hhmm);
+    if (t === null) return null;
+    return t > Date.now() + 5 * 60000 ? t - 86400000 : t;
+  }
   function sideLabel(s) { return s === 'L' ? 'Left' : s === 'R' ? 'Right' : 'Both sides'; }
   function kindLabel(k) { return k === 'wet' ? 'Wet' : k === 'dirty' ? 'Dirty' : 'Wet + dirty'; }
   function milkLabel(k) { return k === 'formula' ? 'Formula' : k === 'breast' ? 'Breast milk' : 'Mixed'; }
@@ -746,6 +917,9 @@
     if (e.type === 'bottle') return '🍼';
     if (e.type === 'solid') return '🥄';
     if (e.type === 'diaper') return e.kind === 'wet' ? '💧' : e.kind === 'dirty' ? '💩' : '💧💩';
+    if (e.type === 'med') return '💊';
+    if (e.type === 'pump') return '🥛';
+    if (e.type === 'health') return '🌡️';
     return '•';
   }
   function entryTypeLabel(e) {
@@ -754,7 +928,17 @@
     if (e.type === 'bottle') return 'Bottle';
     if (e.type === 'solid') return 'Solids';
     if (e.type === 'diaper') return 'Diaper';
+    if (e.type === 'med') return 'Medicine';
+    if (e.type === 'pump') return 'Pump';
+    if (e.type === 'health') return 'Health';
     return e.type;
+  }
+  function healthDetail(e) {
+    const parts = [];
+    if (e.temp != null) parts.push(`${e.temp}°C`);
+    if (e.weight != null) parts.push(`${e.weight} kg`);
+    if (e.length != null) parts.push(`${e.length} cm`);
+    return parts.join(' · ');
   }
   function entryDetail(e) {
     if (e.type === 'sleep' || e.type === 'nurse') {
@@ -765,6 +949,9 @@
     if (e.type === 'bottle') return `${e.amount}${e.unit}${e.milk ? ' · ' + milkLabel(e.milk) : ''}`;
     if (e.type === 'diaper') return kindLabel(e.kind);
     if (e.type === 'solid') return e.food || '';
+    if (e.type === 'med') return e.name || '';
+    if (e.type === 'pump') return `${e.amount}${e.unit} · ${sideLabel(e.side)}`;
+    if (e.type === 'health') return healthDetail(e);
     return '';
   }
 
@@ -836,6 +1023,9 @@
     document.getElementById('bottleBtnSub').textContent = agoOr('bottle', 'Amount & type');
     document.getElementById('diaperBtnSub').textContent = agoOr('diaper', 'Wet / dirty');
     document.getElementById('solidBtnSub').textContent = agoOr('solid', 'What & when');
+    document.getElementById('pumpBtnSub').textContent = agoOr('pump', 'Amount & side');
+    document.getElementById('medBtnSub').textContent = agoOr('med', 'Vitamins etc.');
+    document.getElementById('healthBtnSub').textContent = agoOr('health', 'Temp / growth');
   }
 
   // ---- last-24h timeline: one lane per activity type; bars for durations, dots for events ----
@@ -843,8 +1033,11 @@
     { type: 'sleep', ico: '😴' },
     { type: 'nurse', ico: '🤱' },
     { type: 'bottle', ico: '🍼' },
+    { type: 'pump', ico: '🥛' },
     { type: 'diaper', ico: '💧' },
     { type: 'solid', ico: '🥄' },
+    { type: 'med', ico: '💊' },
+    { type: 'health', ico: '🌡️' },
   ];
   function renderTimeline() {
     const now = Date.now();
@@ -873,46 +1066,124 @@
     document.getElementById('timeline').innerHTML = html;
   }
 
+  let logLimit = 50;
   function render() {
     updateStats();
     renderTimeline();
-    const sorted = entries.slice().sort((a,b) => a.start - b.start);
+    renderHistory();
+    const sorted = entries.slice().sort((a,b) => b.start - a.start); // newest first
     if (sorted.length === 0) {
       logList.innerHTML = '<li class="empty">Nothing logged yet.</li>';
       return;
     }
     logList.innerHTML = '';
-    for (let i = sorted.length - 1; i >= 0; i--) {
-      const e = sorted[i];
-      const idx = entries.indexOf(e);
+    const dayFmt = new Intl.DateTimeFormat([], { weekday: 'short', day: 'numeric', month: 'short' });
+    let lastDay = null;
+    for (const e of sorted.slice(0, logLimit)) {
+      const day = new Date(e.start).toDateString();
+      if (day !== lastDay && day !== new Date().toDateString()) {
+        const h = document.createElement('li');
+        h.className = 'empty';
+        h.textContent = dayFmt.format(e.start);
+        logList.appendChild(h);
+      }
+      lastDay = day;
+      const by = e.by ? ` · ${e.by}` : '';
       const li = document.createElement('li');
       li.innerHTML = `<span class="ico">${entryIcon(e)}</span>
-                      <span class="main"><span class="type">${entryTypeLabel(e)}</span><span class="detail">${esc(entryDetail(e))}</span></span>
+                      <span class="main"><span class="type">${entryTypeLabel(e)}</span><span class="detail">${esc(entryDetail(e) + by)}</span></span>
                       <span class="time">${fmtClock(e.start)}</span>
                       <span class="rowacts">
-                        <button class="rowbtn" data-edit="${idx}" aria-label="Edit">✎</button>
-                        <button class="rowbtn" data-del="${idx}" aria-label="Delete">✕</button>
+                        <button class="rowbtn" data-edit="${e.id}" aria-label="Edit">✎</button>
+                        <button class="rowbtn" data-del="${e.id}" aria-label="Delete">✕</button>
                       </span>${e.note ? `<span class="note">${esc(e.note)}</span>` : ''}`;
+      logList.appendChild(li);
+    }
+    if (sorted.length > logLimit) {
+      const li = document.createElement('li');
+      li.className = 'showmore';
+      li.innerHTML = `<button data-more="1">Show earlier (${sorted.length - logLimit} more)</button>`;
       logList.appendChild(li);
     }
   }
 
   const logList = document.getElementById('logList');
   logList.addEventListener('click', (e) => {
+    const more = e.target.closest('[data-more]');
+    if (more) { logLimit += 100; render(); return; }
     const btn = e.target.closest('.rowbtn');
     if (!btn) return;
-    if (btn.dataset.edit !== undefined) editRow(+btn.dataset.edit);
-    else if (btn.dataset.del !== undefined) deleteRow(+btn.dataset.del);
+    if (btn.dataset.edit !== undefined) editRow(btn.dataset.edit);
+    else if (btn.dataset.del !== undefined) deleteRow(btn.dataset.del);
   });
 
-  function deleteRow(i) {
+  function deleteRow(id) {
+    const i = entries.findIndex(e => e.id === id);
+    if (i === -1) return;
     const e = entries[i];
-    if (!e) return;
     if (!confirm(`Delete this ${entryTypeLabel(e).toLowerCase()} entry from ${fmtClock(e.start)}?`)) return;
     entries.splice(i, 1);
+    deleted[id] = Date.now(); // tombstone so the delete survives merges
     touch();
     render();
   }
+
+  // ---- daily history (last 7 days from the hot window) + CSV export ----
+  function renderHistory() {
+    const el = document.getElementById('history');
+    const dayFmt = new Intl.DateTimeFormat([], { weekday: 'short', day: 'numeric', month: 'short' });
+    const toMl = (e) => (e.amount || 0) * (e.unit === 'oz' ? 29.57 : 1);
+    let html = '<div class="histrow head"><span>Day</span><span>Feeds</span><span>Bottle</span><span>Sleep</span><span>Diapers</span></div>';
+    for (let d = 0; d < 7; d++) {
+      const day0 = new Date(); day0.setHours(0, 0, 0, 0); day0.setDate(day0.getDate() - d);
+      const day1 = day0.getTime() + 86400000;
+      const todays = entries.filter(e => e.start >= day0.getTime() && e.start < day1);
+      if (d > 0 && todays.length === 0) continue;
+      const feeds = todays.filter(e => e.type === 'nurse' || e.type === 'bottle' || e.type === 'solid').length;
+      const ml = Math.round(todays.filter(e => e.type === 'bottle').reduce((n, e) => n + toMl(e), 0));
+      const sleepMs = todays.filter(e => e.type === 'sleep').reduce((n, e) => n + (e.duration || 0), 0);
+      const diapers = todays.filter(e => e.type === 'diaper').length;
+      html += `<div class="histrow"><span class="day">${d === 0 ? 'Today' : dayFmt.format(day0)}</span><span>${feeds}</span><span>${ml ? ml + ' ml' : '—'}</span><span>${sleepMs ? fmtShort(sleepMs) : '—'}</span><span>${diapers}</span></div>`;
+    }
+    el.innerHTML = html;
+  }
+
+  const CSV_COLS = ['date', 'time', 'type', 'duration_min', 'side', 'amount', 'unit', 'milk', 'kind', 'food', 'name', 'temp_c', 'weight_kg', 'length_cm', 'by', 'note'];
+  function csvRow(e) {
+    const d = new Date(e.start);
+    const v = {
+      date: d.toISOString().slice(0, 10),
+      time: timeInputVal(e.start),
+      type: e.type,
+      duration_min: e.duration ? Math.round(e.duration / 60000) : '',
+      side: e.side || '', amount: e.amount ?? '', unit: e.unit || '', milk: e.milk || '',
+      kind: e.kind || '', food: e.food || '', name: e.name || '',
+      temp_c: e.temp ?? '', weight_kg: e.weight ?? '', length_cm: e.length ?? '',
+      by: e.by || '', note: e.note || '',
+    };
+    return CSV_COLS.map(c => `"${String(v[c]).replace(/"/g, '""')}"`).join(',');
+  }
+  document.getElementById('csvBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('csvBtn');
+    btn.disabled = true; btn.textContent = 'Exporting…';
+    let all = entries.slice();
+    try { // pull archived months from the server for the full history
+      const months = (await (await fetch(`${SYNC_URL}/archive/${room}`)).json()).months || [];
+      for (const mon of months) {
+        const arch = await (await fetch(`${SYNC_URL}/archive/${room}/${mon}`)).json();
+        if (Array.isArray(arch)) all = all.concat(arch);
+      }
+    } catch(e) { /* offline: export the hot window only */ }
+    const seen = new Set();
+    all = all.filter(e => !seen.has(e.id) && seen.add(e.id)).sort((a, b) => a.start - b.start);
+    const csv = CSV_COLS.join(',') + '\n' + all.map(csvRow).join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = 'baby-tracker.csv';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    btn.disabled = false; btn.textContent = 'Export CSV';
+  });
 
   // ---- start/stop timer buttons: sleep + nurse ----
   const sleepBtn = document.getElementById('sleepBtn');
@@ -931,7 +1202,7 @@
     if (!b) return;
     nurseSide = b.dataset.side;
     try { localStorage.setItem(NURSE_SIDE_KEY, nurseSide); } catch(err) {}
-    if (active.nurse) { active.nurse.side = nurseSide; touch(); }
+    if (active.nurse) { active.nurse.side = nurseSide; active.nurse.mt = Date.now(); touch(); }
     paintNurseSide();
   });
 
@@ -969,7 +1240,7 @@
   sleepBtn.addEventListener('click', () => {
     if (!active.sleep) { openSleepModal(); return; }
     const end = Date.now();
-    entries.push({ id: 's'+active.sleep.start, type: 'sleep', start: active.sleep.start, end, duration: end - active.sleep.start });
+    entries.push(stamp({ id: 's'+active.sleep.start, type: 'sleep', start: active.sleep.start, end, duration: end - active.sleep.start }));
     active.sleep = null;
     render();
     updateActionUI();
@@ -979,7 +1250,7 @@
   nurseBtn.addEventListener('click', () => {
     if (!active.nurse) { openNurseModal(); return; }
     const end = Date.now();
-    entries.push({ id: 'n'+active.nurse.start, type: 'nurse', start: active.nurse.start, end, duration: end - active.nurse.start, side: active.nurse.side });
+    entries.push(stamp({ id: 'n'+active.nurse.start, type: 'nurse', start: active.nurse.start, end, duration: end - active.nurse.start, side: active.nurse.side }));
     active.nurse = null;
     render();
     updateActionUI();
@@ -1042,7 +1313,7 @@
   document.getElementById('nurseCancel').addEventListener('click', () => closeOverlay('nurseOverlay'));
   document.getElementById('nurseOverlay').addEventListener('click', (e) => { if (e.target.id === 'nurseOverlay') closeOverlay('nurseOverlay'); });
   document.getElementById('nurseStartTimer').addEventListener('click', () => {
-    active.nurse = { start: Date.now(), side: nurseSide };
+    active.nurse = { start: Date.now(), mt: Date.now(), side: nurseSide };
     closeOverlay('nurseOverlay');
     updateActionUI();
     touch();
@@ -1050,7 +1321,7 @@
   document.getElementById('nurseLogSave').addEventListener('click', () => {
     const end = Date.now();
     const start = end - nurseMinWheel.get() * 60000;
-    entries.push({ id: 'n'+start, type: 'nurse', start, end, duration: end - start, side: nurseSide });
+    entries.push(stamp({ id: 'n'+start, type: 'nurse', start, end, duration: end - start, side: nurseSide }));
     closeOverlay('nurseOverlay');
     touch(); render();
   });
@@ -1065,7 +1336,7 @@
   document.getElementById('sleepCancel').addEventListener('click', () => closeOverlay('sleepOverlay'));
   document.getElementById('sleepOverlay').addEventListener('click', (e) => { if (e.target.id === 'sleepOverlay') closeOverlay('sleepOverlay'); });
   document.getElementById('sleepStartTimer').addEventListener('click', () => {
-    active.sleep = { start: Date.now() };
+    active.sleep = { start: Date.now(), mt: Date.now() };
     closeOverlay('sleepOverlay');
     updateActionUI();
     touch();
@@ -1075,7 +1346,7 @@
     if (duration <= 0) { showErr('sleepErr', 'Pick a duration'); return; }
     const end = Date.now();
     const start = end - duration;
-    entries.push({ id: 's'+start, type: 'sleep', start, end, duration });
+    entries.push(stamp({ id: 's'+start, type: 'sleep', start, end, duration }));
     closeOverlay('sleepOverlay');
     touch(); render();
   });
@@ -1094,10 +1365,10 @@
   document.getElementById('bottleSave').addEventListener('click', () => {
     const amount = parseFloat(document.getElementById('bottleAmount').value);
     if (!amount || amount <= 0) { showErr('bottleErr', 'Enter an amount greater than 0'); return; }
-    const start = applyTimeToDate(Date.now(), document.getElementById('bottleTime').value);
+    const start = applyTimeBack(document.getElementById('bottleTime').value);
     if (start === null) { showErr('bottleErr', 'Time must be HH:MM'); return; }
     const note = document.getElementById('bottleNote').value.trim();
-    entries.push({ id: 'b'+Date.now(), type: 'bottle', start, amount, unit: document.getElementById('bottleUnit').value, milk: bottleMilk.get(), note: note || undefined });
+    entries.push(stamp({ id: 'b'+Date.now(), type: 'bottle', start, amount, unit: document.getElementById('bottleUnit').value, milk: bottleMilk.get(), note: note || undefined }));
     touch(); render();
     closeOverlay('bottleOverlay');
   });
@@ -1113,10 +1384,10 @@
   document.getElementById('diaperCancel').addEventListener('click', () => closeOverlay('diaperOverlay'));
   document.getElementById('diaperOverlay').addEventListener('click', (e) => { if (e.target.id === 'diaperOverlay') closeOverlay('diaperOverlay'); });
   document.getElementById('diaperSave').addEventListener('click', () => {
-    const start = applyTimeToDate(Date.now(), document.getElementById('diaperTime').value);
+    const start = applyTimeBack(document.getElementById('diaperTime').value);
     if (start === null) { showErr('diaperErr', 'Time must be HH:MM'); return; }
     const note = document.getElementById('diaperNote').value.trim();
-    entries.push({ id: 'd'+Date.now(), type: 'diaper', start, kind: diaperKind.get(), note: note || undefined });
+    entries.push(stamp({ id: 'd'+Date.now(), type: 'diaper', start, kind: diaperKind.get(), note: note || undefined }));
     touch(); render();
     closeOverlay('diaperOverlay');
   });
@@ -1133,11 +1404,78 @@
   document.getElementById('solidSave').addEventListener('click', () => {
     const food = document.getElementById('solidFood').value.trim();
     if (!food) { showErr('solidErr', 'Enter what they ate'); return; }
-    const start = applyTimeToDate(Date.now(), document.getElementById('solidTime').value);
+    const start = applyTimeBack(document.getElementById('solidTime').value);
     if (start === null) { showErr('solidErr', 'Time must be HH:MM'); return; }
-    entries.push({ id: 'f'+Date.now(), type: 'solid', start, food });
+    entries.push(stamp({ id: 'f'+Date.now(), type: 'solid', start, food }));
     touch(); render();
     closeOverlay('solidOverlay');
+  });
+
+  // Pump
+  const pumpSide = choiceSetup('pumpSideChoice', 'both');
+  document.getElementById('pumpBtn').addEventListener('click', () => {
+    document.getElementById('pumpTime').value = timeInputVal(Date.now());
+    document.getElementById('pumpAmount').value = '';
+    document.getElementById('pumpNote').value = '';
+    hideErr('pumpErr');
+    openOverlay('pumpOverlay');
+  });
+  document.getElementById('pumpCancel').addEventListener('click', () => closeOverlay('pumpOverlay'));
+  document.getElementById('pumpOverlay').addEventListener('click', (e) => { if (e.target.id === 'pumpOverlay') closeOverlay('pumpOverlay'); });
+  document.getElementById('pumpSave').addEventListener('click', () => {
+    const amount = parseFloat(document.getElementById('pumpAmount').value);
+    if (!amount || amount <= 0) { showErr('pumpErr', 'Enter an amount greater than 0'); return; }
+    const start = applyTimeBack(document.getElementById('pumpTime').value);
+    if (start === null) { showErr('pumpErr', 'Time must be HH:MM'); return; }
+    const note = document.getElementById('pumpNote').value.trim();
+    entries.push(stamp({ id: 'p'+Date.now(), type: 'pump', start, amount, unit: document.getElementById('pumpUnit').value, side: pumpSide.get(), note: note || undefined }));
+    touch(); render();
+    closeOverlay('pumpOverlay');
+  });
+
+  // Meds (remembers the last name — most med logging is the same daily drops)
+  const LAST_MED_KEY = 'btLastMed_v1';
+  document.getElementById('medBtn').addEventListener('click', () => {
+    document.getElementById('medTime').value = timeInputVal(Date.now());
+    let last = ''; try { last = localStorage.getItem(LAST_MED_KEY) || ''; } catch(e) {}
+    document.getElementById('medName').value = last;
+    document.getElementById('medNote').value = '';
+    hideErr('medErr');
+    openOverlay('medOverlay');
+  });
+  document.getElementById('medCancel').addEventListener('click', () => closeOverlay('medOverlay'));
+  document.getElementById('medOverlay').addEventListener('click', (e) => { if (e.target.id === 'medOverlay') closeOverlay('medOverlay'); });
+  document.getElementById('medSave').addEventListener('click', () => {
+    const name = document.getElementById('medName').value.trim();
+    if (!name) { showErr('medErr', 'Enter what was given'); return; }
+    const start = applyTimeBack(document.getElementById('medTime').value);
+    if (start === null) { showErr('medErr', 'Time must be HH:MM'); return; }
+    try { localStorage.setItem(LAST_MED_KEY, name); } catch(e) {}
+    const note = document.getElementById('medNote').value.trim();
+    entries.push(stamp({ id: 'm'+Date.now(), type: 'med', start, name, note: note || undefined }));
+    touch(); render();
+    closeOverlay('medOverlay');
+  });
+
+  // Health (temperature / weight / length — any subset)
+  document.getElementById('healthBtn').addEventListener('click', () => {
+    document.getElementById('healthTime').value = timeInputVal(Date.now());
+    for (const id of ['healthTemp', 'healthWeight', 'healthLength', 'healthNote']) document.getElementById(id).value = '';
+    hideErr('healthErr');
+    openOverlay('healthOverlay');
+  });
+  document.getElementById('healthCancel').addEventListener('click', () => closeOverlay('healthOverlay'));
+  document.getElementById('healthOverlay').addEventListener('click', (e) => { if (e.target.id === 'healthOverlay') closeOverlay('healthOverlay'); });
+  document.getElementById('healthSave').addEventListener('click', () => {
+    const num = (id) => { const v = parseFloat(document.getElementById(id).value); return isNaN(v) ? undefined : v; };
+    const temp = num('healthTemp'), weight = num('healthWeight'), length = num('healthLength');
+    if (temp === undefined && weight === undefined && length === undefined) { showErr('healthErr', 'Fill in at least one measurement'); return; }
+    const start = applyTimeBack(document.getElementById('healthTime').value);
+    if (start === null) { showErr('healthErr', 'Time must be HH:MM'); return; }
+    const note = document.getElementById('healthNote').value.trim();
+    entries.push(stamp({ id: 'h'+Date.now(), type: 'health', start, temp, weight, length, note: note || undefined }));
+    touch(); render();
+    closeOverlay('healthOverlay');
   });
 
   // ---- edit modal (type-aware) ----
@@ -1148,10 +1486,10 @@
   const editAmount = document.getElementById('editAmount');
   const editUnit = document.getElementById('editUnit');
   const editFood = document.getElementById('editFood');
-  let editIdx = null;
+  let editId = null; // entry id (not index): sync merges can reorder while the dialog is open
   let editSide = null, editMilk = null, editKind = null;
 
-  const wraps = ['editEndWrap','editSideWrap','editAmountWrap','editMilkWrap','editKindWrap','editFoodWrap'];
+  const wraps = ['editEndWrap','editSideWrap','editAmountWrap','editMilkWrap','editKindWrap','editFoodWrap','editMedWrap','editHealthWrap'];
   function showWraps(ids) {
     wraps.forEach(id => document.getElementById(id).style.display = ids.includes(id) ? 'block' : 'none');
   }
@@ -1162,10 +1500,10 @@
   document.getElementById('editMilkChoice').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { editMilk = b.dataset.val; setChoiceSel('editMilkChoice', editMilk); } });
   document.getElementById('editKindChoice').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { editKind = b.dataset.val; setChoiceSel('editKindChoice', editKind); } });
 
-  function editRow(i) {
-    const e = entries[i];
+  function editRow(id) {
+    const e = entries.find(x => x.id === id);
     if (!e) return;
-    editIdx = i;
+    editId = id;
     document.getElementById('editTitle').textContent = `Edit ${entryTypeLabel(e).toLowerCase()}`;
     editTime.value = timeInputVal(e.start);
     editNote.value = e.note || '';
@@ -1178,22 +1516,33 @@
     } else if (e.type === 'bottle') {
       editAmount.value = e.amount; editUnit.value = e.unit; editMilk = e.milk || 'formula'; setChoiceSel('editMilkChoice', editMilk);
       showWraps(['editAmountWrap','editMilkWrap']);
+    } else if (e.type === 'pump') {
+      editAmount.value = e.amount; editUnit.value = e.unit; editSide = e.side || 'both'; setChoiceSel('editSideChoice', editSide);
+      showWraps(['editAmountWrap','editSideWrap']);
     } else if (e.type === 'diaper') {
       editKind = e.kind; setChoiceSel('editKindChoice', editKind);
       showWraps(['editKindWrap']);
     } else if (e.type === 'solid') {
       editFood.value = e.food || '';
       showWraps(['editFoodWrap']);
+    } else if (e.type === 'med') {
+      document.getElementById('editMedName').value = e.name || '';
+      showWraps(['editMedWrap']);
+    } else if (e.type === 'health') {
+      document.getElementById('editHealthTemp').value = e.temp ?? '';
+      document.getElementById('editHealthWeight').value = e.weight ?? '';
+      document.getElementById('editHealthLength').value = e.length ?? '';
+      showWraps(['editHealthWrap']);
     } else {
       showWraps([]);
     }
     editOverlay.classList.add('open');
   }
-  function closeEdit() { editOverlay.classList.remove('open'); editIdx = null; }
+  function closeEdit() { editOverlay.classList.remove('open'); editId = null; }
   document.getElementById('editCancel').addEventListener('click', closeEdit);
   editOverlay.addEventListener('click', (e) => { if (e.target === editOverlay) closeEdit(); });
   document.getElementById('editSave').addEventListener('click', () => {
-    const e = entries[editIdx];
+    const e = entries.find(x => x.id === editId);
     if (!e) { closeEdit(); return; }
     const newStart = applyTimeToDate(e.start, editTime.value);
     if (newStart === null) { showErr('editErr', 'Start time must be HH:MM'); return; }
@@ -1211,15 +1560,29 @@
       const amt = parseFloat(editAmount.value);
       if (!amt || amt <= 0) { showErr('editErr', 'Enter an amount greater than 0'); return; }
       e.amount = amt; e.unit = editUnit.value; e.milk = editMilk;
+    } else if (e.type === 'pump') {
+      const amt = parseFloat(editAmount.value);
+      if (!amt || amt <= 0) { showErr('editErr', 'Enter an amount greater than 0'); return; }
+      e.amount = amt; e.unit = editUnit.value; e.side = editSide;
     } else if (e.type === 'diaper') {
       e.kind = editKind;
     } else if (e.type === 'solid') {
       const food = editFood.value.trim();
       if (!food) { showErr('editErr', 'Enter what they ate'); return; }
       e.food = food;
+    } else if (e.type === 'med') {
+      const name = document.getElementById('editMedName').value.trim();
+      if (!name) { showErr('editErr', 'Enter what was given'); return; }
+      e.name = name;
+    } else if (e.type === 'health') {
+      const num = (id) => { const v = parseFloat(document.getElementById(id).value); return isNaN(v) ? undefined : v; };
+      const temp = num('editHealthTemp'), weight = num('editHealthWeight'), length = num('editHealthLength');
+      if (temp === undefined && weight === undefined && length === undefined) { showErr('editErr', 'Fill in at least one measurement'); return; }
+      e.temp = temp; e.weight = weight; e.length = length;
     }
     const note = editNote.value.trim();
     if (note) e.note = note; else delete e.note;
+    e.mt = Date.now(); // per-entry conflict resolution: newest edit wins
     touch();
     render();
     closeEdit();
@@ -1243,19 +1606,47 @@
   for (const r of RULES) {
     const sel = document.getElementById(r.min);
     sel.innerHTML = DUR_OPTS.map(v => `<option value="${v}">${durLabel(v)}</option>`).join('');
-    sel.addEventListener('change', () => { alerts[r.key].min = +sel.value; touch(); });
+    sel.addEventListener('change', () => { alerts[r.key].min = +sel.value; bumpAlerts(); });
     const crit = document.getElementById(r.crit);
     crit.innerHTML = CRIT_OPTS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
-    crit.addEventListener('change', () => { alerts[r.key].crit = crit.value; touch(); });
-    document.getElementById(r.on).addEventListener('change', (e) => { alerts[r.key].on = e.target.checked; touch(); });
+    crit.addEventListener('change', () => { alerts[r.key].crit = crit.value; bumpAlerts(); });
+    document.getElementById(r.on).addEventListener('change', (e) => { alerts[r.key].on = e.target.checked; bumpAlerts(); });
   }
+
+  // quiet hours: shared window during which the worker sends nothing
+  const HOUR_OPTS = Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, '0')}:00`);
+  function quietCfg() {
+    if (!alerts.quiet) alerts.quiet = defaultAlerts().quiet;
+    return alerts.quiet;
+  }
+  for (const id of ['alQuietFrom', 'alQuietTo'])
+    document.getElementById(id).innerHTML = HOUR_OPTS.map(h => `<option>${h}</option>`).join('');
+  document.getElementById('alQuietOn').addEventListener('change', (e) => {
+    const q = quietCfg(); q.on = e.target.checked;
+    q.tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    bumpAlerts();
+  });
+  document.getElementById('alQuietFrom').addEventListener('change', (e) => { quietCfg().from = e.target.value; bumpAlerts(); });
+  document.getElementById('alQuietTo').addEventListener('change', (e) => { quietCfg().to = e.target.value; bumpAlerts(); });
+
   function paintAlertRules() {
     for (const r of RULES) {
       document.getElementById(r.on).checked = !!alerts[r.key].on;
       document.getElementById(r.min).value = String(alerts[r.key].min);
       document.getElementById(r.crit).value = alerts[r.key].crit || 'normal';
     }
+    const q = quietCfg();
+    document.getElementById('alQuietOn').checked = !!q.on;
+    document.getElementById('alQuietFrom').value = q.from;
+    document.getElementById('alQuietTo').value = q.to;
   }
+
+  // per-device name stamped onto entries this device logs
+  const deviceNameInput = document.getElementById('deviceName');
+  deviceNameInput.addEventListener('change', () => {
+    deviceName = deviceNameInput.value.trim();
+    try { localStorage.setItem(NAME_KEY, deviceName); } catch(e) {}
+  });
 
   const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
   const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
@@ -1352,6 +1743,7 @@
   }
 
   document.getElementById('alertsBtn').addEventListener('click', () => {
+    deviceNameInput.value = deviceName;
     paintAlertRules();
     updatePushUI();
     openOverlay('alertsOverlay');
