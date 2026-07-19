@@ -197,11 +197,11 @@
   #loginOverlay { background: var(--bg); z-index: 20; }
 
   /* alerts modal */
-  .alertrow { display: flex; align-items: center; gap: 8px; padding: 7px 0; font-size: 14px; }
+  .alertrow { display: flex; align-items: center; gap: 6px; padding: 7px 0; font-size: 13px; }
   .alertrow span { flex: 1; }
   .alertrow input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
   .alertrow select {
-    width: 96px; padding: 8px 6px; font-size: 14px; border-radius: 8px;
+    width: 74px; padding: 8px 4px; font-size: 13px; border-radius: 8px;
     border: 1px solid var(--border); background: var(--bg); color: var(--text);
   }
   .pushstatus { font-size: 12px; color: var(--muted); line-height: 1.5; }
@@ -355,10 +355,11 @@
       </div>
       <div class="field" style="margin-top:16px;">
         <label>Remind us when (shared between devices)</label>
-        <div class="alertrow"><input type="checkbox" id="alFeedOn"><span>🍼 No feed for</span><select id="alFeedMin"></select></div>
-        <div class="alertrow"><input type="checkbox" id="alDiaperOn"><span>💧 No diaper for</span><select id="alDiaperMin"></select></div>
-        <div class="alertrow"><input type="checkbox" id="alAwakeOn"><span>☀️ Awake for</span><select id="alAwakeMin"></select></div>
-        <div class="alertrow"><input type="checkbox" id="alSleepOn"><span>😴 Asleep for</span><select id="alSleepMin"></select></div>
+        <div class="alertrow"><input type="checkbox" id="alFeedOn"><span>🍼 No feed for</span><select id="alFeedMin"></select><select id="alFeedCrit" title="How loud"></select></div>
+        <div class="alertrow"><input type="checkbox" id="alDiaperOn"><span>💧 No diaper for</span><select id="alDiaperMin"></select><select id="alDiaperCrit" title="How loud"></select></div>
+        <div class="alertrow"><input type="checkbox" id="alAwakeOn"><span>☀️ Awake for</span><select id="alAwakeMin"></select><select id="alAwakeCrit" title="How loud"></select></div>
+        <div class="alertrow"><input type="checkbox" id="alSleepOn"><span>😴 Asleep for</span><select id="alSleepMin"></select><select id="alSleepCrit" title="How loud"></select></div>
+        <div class="pushstatus" style="margin-top:6px;">Quiet = silent, once. Normal = sound, repeats every 30 min. Nag = sound, repeats every 10 min until logged.</div>
       </div>
       <div class="btns">
         <button id="alertsClose">Close</button>
@@ -578,10 +579,10 @@
 
   function defaultAlerts() {
     return {
-      feed:   { on: false, min: 180 },
-      diaper: { on: false, min: 240 },
-      awake:  { on: false, min: 120 },
-      sleep:  { on: false, min: 180 },
+      feed:   { on: false, min: 180, crit: 'normal' },
+      diaper: { on: false, min: 240, crit: 'normal' },
+      awake:  { on: false, min: 120, crit: 'normal' },
+      sleep:  { on: false, min: 180, crit: 'normal' },
     };
   }
 
@@ -1228,12 +1229,13 @@
   // Rules are shared state (synced, evaluated server-side by the worker cron);
   // the push subscription is per-device.
   const RULES = [
-    { key: 'feed',   on: 'alFeedOn',   min: 'alFeedMin' },
-    { key: 'diaper', on: 'alDiaperOn', min: 'alDiaperMin' },
-    { key: 'awake',  on: 'alAwakeOn',  min: 'alAwakeMin' },
-    { key: 'sleep',  on: 'alSleepOn',  min: 'alSleepMin' },
+    { key: 'feed',   on: 'alFeedOn',   min: 'alFeedMin',   crit: 'alFeedCrit' },
+    { key: 'diaper', on: 'alDiaperOn', min: 'alDiaperMin', crit: 'alDiaperCrit' },
+    { key: 'awake',  on: 'alAwakeOn',  min: 'alAwakeMin',  crit: 'alAwakeCrit' },
+    { key: 'sleep',  on: 'alSleepOn',  min: 'alSleepMin',  crit: 'alSleepCrit' },
   ];
   const DUR_OPTS = [30, 45, 60, 90, 120, 150, 180, 210, 240, 300, 360, 480, 720];
+  const CRIT_OPTS = [['low', 'Quiet'], ['normal', 'Normal'], ['high', 'Nag']];
   function durLabel(min) {
     const h = Math.floor(min / 60), m = min % 60;
     return h > 0 ? (m ? `${h}h ${m}m` : `${h}h`) : `${m}m`;
@@ -1242,12 +1244,16 @@
     const sel = document.getElementById(r.min);
     sel.innerHTML = DUR_OPTS.map(v => `<option value="${v}">${durLabel(v)}</option>`).join('');
     sel.addEventListener('change', () => { alerts[r.key].min = +sel.value; touch(); });
+    const crit = document.getElementById(r.crit);
+    crit.innerHTML = CRIT_OPTS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+    crit.addEventListener('change', () => { alerts[r.key].crit = crit.value; touch(); });
     document.getElementById(r.on).addEventListener('change', (e) => { alerts[r.key].on = e.target.checked; touch(); });
   }
   function paintAlertRules() {
     for (const r of RULES) {
       document.getElementById(r.on).checked = !!alerts[r.key].on;
       document.getElementById(r.min).value = String(alerts[r.key].min);
+      document.getElementById(r.crit).value = alerts[r.key].crit || 'normal';
     }
   }
 

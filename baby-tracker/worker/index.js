@@ -15,7 +15,9 @@ const CORS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 const SUBJECT = 'mailto:davidsen908@gmail.com';
-const REPEAT_MS = 30 * 60000; // re-alert cadence while a condition keeps holding
+// Re-alert cadence per rule criticality while a condition keeps holding.
+// null = fire once per crossing, no repeats.
+const REPEAT_MS = { low: null, normal: 30 * 60000, high: 10 * 60000 };
 
 const json = (obj, status = 200) =>
   new Response(JSON.stringify(obj), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
@@ -39,10 +41,11 @@ async function roomSubs(env, room) {
 // service reports gone (404/410). Returns per-device statuses.
 async function pushRoom(env, room, payload) {
   const jwk = JSON.parse(env.VAPID_JWK);
+  const urgency = payload.crit === 'low' ? 'normal' : 'high';
   const results = [];
   for (const { key, sub } of await roomSubs(env, room)) {
     let status;
-    try { status = await sendPush(sub, payload, jwk, SUBJECT); }
+    try { status = await sendPush(sub, payload, jwk, SUBJECT, { urgency }); }
     catch { status = 0; }
     if (status === 404 || status === 410) await env.STATE.delete(key);
     results.push(status);
@@ -67,11 +70,12 @@ export function dueAlerts(state, now) {
     return best;
   };
   const over = (t, rule) => rule && rule.on && t !== null && now - t > rule.min * 60000;
+  const crit = (rule) => (rule && rule.crit) || 'normal';
   const due = [];
-  if (!active.nurse) { const t = last(['nurse', 'bottle', 'solid']); if (over(t, a.feed)) due.push({ key: 'feed', body: `🍼 No feed for ${fmtDur(now - t)}` }); }
-  { const t = last(['diaper']); if (over(t, a.diaper)) due.push({ key: 'diaper', body: `💧 No diaper change for ${fmtDur(now - t)}` }); }
-  if (!active.sleep) { const t = last(['sleep']); if (over(t, a.awake)) due.push({ key: 'awake', body: `☀️ Awake for ${fmtDur(now - t)}` }); }
-  if (active.sleep) { const t = active.sleep.start; if (over(t, a.sleep)) due.push({ key: 'sleep', body: `😴 Asleep for ${fmtDur(now - t)}` }); }
+  if (!active.nurse) { const t = last(['nurse', 'bottle', 'solid']); if (over(t, a.feed)) due.push({ key: 'feed', crit: crit(a.feed), body: `🍼 No feed for ${fmtDur(now - t)}` }); }
+  { const t = last(['diaper']); if (over(t, a.diaper)) due.push({ key: 'diaper', crit: crit(a.diaper), body: `💧 No diaper change for ${fmtDur(now - t)}` }); }
+  if (!active.sleep) { const t = last(['sleep']); if (over(t, a.awake)) due.push({ key: 'awake', crit: crit(a.awake), body: `☀️ Awake for ${fmtDur(now - t)}` }); }
+  if (active.sleep) { const t = active.sleep.start; if (over(t, a.sleep)) due.push({ key: 'sleep', crit: crit(a.sleep), body: `😴 Asleep for ${fmtDur(now - t)}` }); }
   return due;
 }
 
@@ -94,8 +98,9 @@ async function checkAlerts(env) {
       if (!dueKeys.has(k)) { delete alerted[k]; changed = true; } // condition reset -> next crossing alerts immediately
     }
     for (const d of due) {
-      if (alerted[d.key] && now - alerted[d.key] < REPEAT_MS) continue;
-      await pushRoom(env, room, { title: 'Baby Tracker', body: d.body, tag: 'bt-' + d.key });
+      const repeat = REPEAT_MS[d.crit] ?? REPEAT_MS.normal;
+      if (alerted[d.key] && (repeat === null || now - alerted[d.key] < repeat)) continue;
+      await pushRoom(env, room, { title: 'Baby Tracker', body: d.body, tag: 'bt-' + d.key, crit: d.crit });
       alerted[d.key] = now;
       changed = true;
     }

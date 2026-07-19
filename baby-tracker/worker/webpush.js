@@ -69,7 +69,7 @@ export async function vapidHeaders(endpoint, jwk, subject) {
 }
 
 // Send one push. Returns the push service's HTTP status.
-export async function sendPush(sub, payloadObj, jwk, subject, ttl = 3600) {
+export async function sendPush(sub, payloadObj, jwk, subject, { ttl = 3600, urgency = 'high' } = {}) {
   const body = await encryptPayload(JSON.stringify(payloadObj), sub.keys.p256dh, sub.keys.auth);
   const auth = await vapidHeaders(sub.endpoint, jwk, subject);
   const res = await fetch(sub.endpoint, {
@@ -79,7 +79,7 @@ export async function sendPush(sub, payloadObj, jwk, subject, ttl = 3600) {
       'Content-Encoding': 'aes128gcm',
       'Content-Type': 'application/octet-stream',
       TTL: String(ttl),
-      Urgency: 'high',
+      Urgency: urgency,
     },
     body,
   });

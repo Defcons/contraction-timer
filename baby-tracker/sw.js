@@ -27,11 +27,15 @@ self.addEventListener('fetch', (e) => {
 self.addEventListener('push', (e) => {
   let d = {};
   try { d = e.data.json(); } catch (err) {}
+  // crit: 'low' = silent; 'high' = sticky + re-buzz on repeats (where supported)
   e.waitUntil(self.registration.showNotification(d.title || 'Baby Tracker', {
     body: d.body || '',
     tag: d.tag || 'bt',
     icon: './icon-192.png',
     badge: './icon-192.png',
+    silent: d.crit === 'low',
+    requireInteraction: d.crit === 'high',
+    renotify: d.crit === 'high',
   }));
 });
 
