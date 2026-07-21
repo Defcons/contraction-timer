@@ -1,6 +1,9 @@
 {
+  "id": "./",
   "name": "Baby Tracker",
-  "short_name": "Baby",
+  "short_name": "Baby Tracker",
+  "description": "Log feeds, diapers & sleep — synced across the family's devices.",
+  "lang": "en",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
