@@ -270,7 +270,10 @@
     border: 1px solid var(--border); background: var(--card); color: var(--soft);
   }
   .tlspans button.sel { background: var(--accent); border-color: var(--accent2); color: #fff; font-weight: 600; }
-  .tl { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 10px 12px 8px; }
+  .tl {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 10px 12px 8px;
+    touch-action: pan-y; user-select: none; -webkit-user-select: none;
+  }
   .tlrow { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
   .tlico { font-size: 13px; width: 18px; text-align: center; flex: none; }
   .tltrack { position: relative; flex: 1; height: 14px; background: var(--bg); border-radius: 4px; overflow: hidden; }
@@ -279,7 +282,21 @@
   .tlside { font-size: 8px; font-weight: 700; color: #fff; line-height: 1; }
   .tldot { position: absolute; top: 50%; width: 7px; height: 7px; border-radius: 50%; transform: translate(-50%,-50%); }
   .tlem { position: absolute; top: 50%; transform: translate(-50%,-50%); font-size: 10px; line-height: 1; white-space: nowrap; }
-  .tlaxis { display: flex; justify-content: space-between; font-size: 10px; color: var(--subtle); padding: 2px 0 0 26px; }
+  .tltick { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border2); }
+  /* time-scrubber: drag across the lanes to read an exact time */
+  .tlbody { position: relative; }
+  .tlscrub { position: absolute; top: 0; bottom: 6px; left: 26px; right: 0; }
+  .tlline { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; background: var(--go-text); border-radius: 1px; }
+  .tlbubble {
+    position: absolute; top: -6px; transform: translate(-50%,-100%);
+    background: var(--card); border: 1px solid var(--border); border-radius: 7px;
+    padding: 3px 8px; font-size: 11px; white-space: nowrap; color: var(--text);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3); cursor: pointer;
+  }
+  .tlaxis { position: relative; height: 14px; margin: 3px 0 0 26px; font-size: 10px; color: var(--subtle); }
+  .tlaxis span { position: absolute; transform: translateX(-50%); }
+  .tlaxis span.edgeL { transform: none; }
+  .tlaxis .tlnow { left: auto; right: 0; transform: none; }
   .tlbar.sleep, .tldot.sleep { background: var(--accent); }
   .tlbar.nurse, .tldot.nurse { background: #c76e9d; }
   .tlbar.bottle, .tldot.bottle { background: var(--warn); }
@@ -1166,13 +1183,26 @@
     { type: 'med', ico: '💊' },
     { type: 'health', ico: '🌡️' },
   ];
+  // hour-aligned clock ticks for the current span (used for gridlines + axis labels)
+  function tlTicks(from, now) {
+    const stepH = tlSpan === 24 ? 6 : tlSpan === 12 ? 3 : 2;
+    const d = new Date(from); d.setMinutes(0, 0, 0);
+    let t = d.getTime();
+    while (t < from || new Date(t).getHours() % stepH !== 0) t += 3600000;
+    const ticks = [];
+    for (; t <= now; t += stepH * 3600000) ticks.push(t);
+    return ticks;
+  }
+
   function renderTimeline() {
     const now = Date.now();
     const spanMs = tlSpan * 3600000;
     const from = now - spanMs;
     const pct = (t) => (t - from) / spanMs * 100;
     const sideTag = (s) => `<span class="tlside">${s === 'both' ? 'B' : (s || '')}</span>`;
-    let html = '';
+    const ticks = tlTicks(from, now);
+    const tickHtml = ticks.map(t => `<span class="tltick" style="left:${pct(t)}%"></span>`).join('');
+    let html = '<div class="tlbody">';
     for (const t of TL_TYPES) {
       let evs = '';
       for (const e of entries) {
@@ -1194,13 +1224,55 @@
         const label = t.type === 'nurse' ? sideTag(a.side) : '';
         evs += `<span class="tlbar live ${t.type}" style="left:${l}%;width:${Math.max(100 - l, 0.7)}%">${label}</span>`;
       }
-      html += `<div class="tlrow"><span class="tlico">${t.ico}</span><div class="tltrack">${evs}</div></div>`;
+      html += `<div class="tlrow"><span class="tlico">${t.ico}</span><div class="tltrack">${tickHtml}${evs}</div></div>`;
     }
-    const q = tlSpan / 4;
-    const fmtQ = (n) => Number.isInteger(n) ? `${n}h` : `${Math.floor(n)}½h`;
-    html += `<div class="tlaxis"><span>${tlSpan}h ago</span><span>${fmtQ(q*3)}</span><span>${fmtQ(q*2)}</span><span>${fmtQ(q)}</span><span>now</span></div>`;
+    html += '<div class="tlscrub"></div></div>';
+    html += '<div class="tlaxis">' + ticks.map(t => {
+      const p = pct(t);
+      if (p > 90) return ''; // would collide with the "now" label
+      return `<span${p < 4 ? ' class="edgeL"' : ''} style="left:${p}%">${fmtClock(t)}</span>`;
+    }).join('') + '<span class="tlnow">now</span></div>';
     document.getElementById('timeline').innerHTML = html;
+    paintTlCursor();
   }
+
+  // ---- timeline scrubber: drag anywhere on the lanes to place a vertical
+  // cursor and read the exact clock time at that point; tap the bubble to
+  // dismiss. Position is a 0..1 fraction so it survives re-renders. ----
+  const timelineEl = document.getElementById('timeline');
+  let tlCursor = null;
+  let tlDragging = false;
+  function paintTlCursor() {
+    const scrub = timelineEl.querySelector('.tlscrub');
+    if (!scrub) return;
+    if (tlCursor === null) { scrub.innerHTML = ''; return; }
+    if (!scrub.firstChild) scrub.innerHTML = '<div class="tlline"></div><div class="tlbubble"></div>';
+    const now = Date.now();
+    const spanMs = tlSpan * 3600000;
+    const t = now - spanMs + tlCursor * spanMs;
+    const ago = now - t;
+    scrub.querySelector('.tlline').style.left = (tlCursor * 100) + '%';
+    const bub = scrub.querySelector('.tlbubble');
+    bub.style.left = (Math.max(0.09, Math.min(0.91, tlCursor)) * 100) + '%';
+    bub.textContent = `${fmtClock(t)} · ${ago < 60000 ? 'now' : fmtShort(ago) + ' ago'}`;
+  }
+  function tlScrubTo(clientX) {
+    const track = timelineEl.querySelector('.tltrack');
+    if (!track) return;
+    const r = track.getBoundingClientRect();
+    tlCursor = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+    paintTlCursor();
+  }
+  timelineEl.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.tlbubble')) { tlCursor = null; paintTlCursor(); return; }
+    if (!e.target.closest('.tlbody')) return;
+    tlDragging = true;
+    try { timelineEl.setPointerCapture(e.pointerId); } catch(err) {}
+    tlScrubTo(e.clientX);
+  });
+  timelineEl.addEventListener('pointermove', (e) => { if (tlDragging) tlScrubTo(e.clientX); });
+  timelineEl.addEventListener('pointerup', () => { tlDragging = false; });
+  timelineEl.addEventListener('pointercancel', () => { tlDragging = false; });
 
   // ---- log list: type filter chips + collapsible day sections (today always
   // open; past days start as a one-line summary header). Both are view state
