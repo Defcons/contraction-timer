@@ -41,6 +41,7 @@
     --go-text: #a03a26;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  .svgico { width: 1em; height: 1em; vertical-align: -0.12em; display: inline-block; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     background: var(--bg);
@@ -342,6 +343,23 @@
 <script>document.documentElement.dataset.theme = (function(){ try { return localStorage.getItem('btTheme') || 'dark'; } catch(e) { return 'dark'; } })();</script>
 </head>
 <body>
+  <!-- custom icons (no Unicode emoji exists for diaper / breast pump) -->
+  <svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="icoDiaper" viewBox="0 0 24 24">
+      <path d="M5 5.5h14c1 0 1.8.8 1.7 1.8l-.3 3.2c-.5 5.3-4.1 8.8-8.4 8.8s-7.9-3.5-8.4-8.8l-.3-3.2C3.2 6.3 4 5.5 5 5.5z" fill="#f6f0e4" stroke="#8f8578" stroke-width="1.3"/>
+      <path d="M4.4 9.2h15.2" stroke="#8f8578" stroke-width="1" opacity=".55"/>
+      <rect x="4" y="5.7" width="3.6" height="2.3" rx=".7" fill="#6fa8cc"/>
+      <rect x="16.4" y="5.7" width="3.6" height="2.3" rx=".7" fill="#6fa8cc"/>
+    </symbol>
+    <symbol id="icoPump" viewBox="0 0 24 24">
+      <path d="M6.6 2h10.8l-3.1 5.3h-4.6z" fill="#bcd4e4" stroke="#7a8b98" stroke-width="1.2" stroke-linejoin="round"/>
+      <rect x="9.4" y="7.2" width="5.2" height="1.8" rx=".5" fill="#bcd4e4" stroke="#7a8b98" stroke-width="1"/>
+      <path d="M8.6 8.9h6.8l-.5 10.9a1.4 1.4 0 0 1-1.4 1.3h-3a1.4 1.4 0 0 1-1.4-1.3z" fill="#fdfaf3" stroke="#7a8b98" stroke-width="1.2"/>
+      <path d="M8.9 14.4h6.2l-.28 5.4c-.04.6-.55 1.1-1.15 1.1h-3.34c-.6 0-1.11-.5-1.15-1.1z" fill="#eedfbd"/>
+      <path d="M14.9 11h-1.7M14.8 12.9h-1.6" stroke="#7a8b98" stroke-width=".9" opacity=".7"/>
+    </symbol>
+  </svg>
+
   <div class="top">
     <div>
       <h1>Baby Tracker</h1>
@@ -391,11 +409,11 @@
       <span class="sub2" id="bottleBtnSub">Amount &amp; type</span>
     </button>
     <button class="actionbtn" id="diaperBtn">
-      <span class="ico">💧</span>Diaper
+      <span class="ico"><svg class="svgico"><use href="#icoDiaper"/></svg></span>Diaper
       <span class="sub2" id="diaperBtnSub">Wet / dirty</span>
     </button>
     <button class="actionbtn" id="pumpBtn">
-      <span class="ico">🥛</span>Pump
+      <span class="ico"><svg class="svgico"><use href="#icoPump"/></svg></span>Pump
       <span class="sub2" id="pumpBtnSub">Amount &amp; side</span>
     </button>
     <button class="actionbtn" id="solidBtn">
@@ -438,8 +456,8 @@
     <button data-t="sleep" title="Sleep">😴</button>
     <button data-t="nurse" title="Nurse">🤱</button>
     <button data-t="bottle" title="Bottle">🍼</button>
-    <button data-t="pump" title="Pump">🥛</button>
-    <button data-t="diaper" title="Diaper">💧</button>
+    <button data-t="pump" title="Pump"><svg class="svgico"><use href="#icoPump"/></svg></button>
+    <button data-t="diaper" title="Diaper"><svg class="svgico"><use href="#icoDiaper"/></svg></button>
     <button data-t="solid" title="Solids">🥄</button>
     <button data-t="med" title="Medicine">💊</button>
     <button data-t="health" title="Health">🌡️</button>
@@ -487,7 +505,7 @@
       <div class="field" style="margin-top:16px;">
         <label>Remind us when (shared between devices)</label>
         <div class="alertrow"><input type="checkbox" id="alFeedOn"><span>🍼 No feed for</span><select id="alFeedMin"></select><select id="alFeedCrit" title="How loud"></select></div>
-        <div class="alertrow"><input type="checkbox" id="alDiaperOn"><span>💧 No diaper for</span><select id="alDiaperMin"></select><select id="alDiaperCrit" title="How loud"></select></div>
+        <div class="alertrow"><input type="checkbox" id="alDiaperOn"><span><svg class="svgico"><use href="#icoDiaper"/></svg> No diaper for</span><select id="alDiaperMin"></select><select id="alDiaperCrit" title="How loud"></select></div>
         <div class="alertrow"><input type="checkbox" id="alAwakeOn"><span>☀️ Awake for</span><select id="alAwakeMin"></select><select id="alAwakeCrit" title="How loud"></select></div>
         <div class="alertrow"><input type="checkbox" id="alSleepOn"><span>😴 Asleep for</span><select id="alSleepMin"></select><select id="alSleepCrit" title="How loud"></select></div>
         <div class="alertrow"><input type="checkbox" id="alQuietOn"><span>🌙 Quiet hours</span><select id="alQuietFrom"></select><select id="alQuietTo"></select></div>
@@ -1044,7 +1062,7 @@
     if (e.type === 'solid') return '🥄';
     if (e.type === 'diaper') return e.kind === 'wet' ? '💧' : e.kind === 'dirty' ? '💩' : '💧💩';
     if (e.type === 'med') return '💊';
-    if (e.type === 'pump') return '🥛';
+    if (e.type === 'pump') return ICO_PUMP;
     if (e.type === 'health') return '🌡️';
     return '•';
   }
@@ -1173,12 +1191,14 @@
   });
   paintTlSpan();
 
+  const ICO_DIAPER = '<svg class="svgico"><use href="#icoDiaper"/></svg>';
+  const ICO_PUMP = '<svg class="svgico"><use href="#icoPump"/></svg>';
   const TL_TYPES = [
     { type: 'sleep', ico: '😴' },
     { type: 'nurse', ico: '🤱' },
     { type: 'bottle', ico: '🍼' },
-    { type: 'pump', ico: '🥛' },
-    { type: 'diaper', ico: '💧' },
+    { type: 'pump', ico: ICO_PUMP },
+    { type: 'diaper', ico: ICO_DIAPER },
     { type: 'solid', ico: '🥄' },
     { type: 'med', ico: '💊' },
     { type: 'health', ico: '🌡️' },
