@@ -83,7 +83,9 @@
   /* start + presets */
   .startbtn {
     width: 100%; margin-top: 14px; padding: 20px; font-size: 18px; font-weight: 700;
-    border-radius: 16px; border: 1px solid var(--accent2); background: var(--accent); color: #fff; cursor: pointer;
+    border-radius: 16px; border: 1px solid var(--accent2); color: #fff; cursor: pointer;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    box-shadow: 0 4px 18px color-mix(in srgb, var(--accent) 30%, transparent);
     transition: transform 0.08s;
   }
   .startbtn:active { transform: scale(0.98); }
@@ -144,15 +146,38 @@
   .tech .flag { color: var(--warn); }
   .disclaimer { font-size: 11px; color: var(--subtle); margin-top: 16px; line-height: 1.5; }
 
-  /* session player */
+  /* overlays: dimmed modals; session + login are full-screen opaque */
   .overlay {
     position: fixed; inset: 0;
-    background: var(--bg);
+    background: rgba(0,0,0,0.55);
     display: none;
     align-items: center; justify-content: center;
     z-index: 10; padding: 16px;
   }
   .overlay.open { display: flex; }
+  #sessionOverlay { background: var(--bg); }
+  #loginOverlay { background: var(--bg); z-index: 20; }
+  .modal {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px;
+    width: 100%; max-width: 360px;
+    max-height: 88vh;
+    overflow-y: auto;
+  }
+  .modal h3 { font-size: 15px; font-weight: 600; margin-bottom: 14px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 5px; }
+  .field input {
+    width: 100%; padding: 10px; font-size: 16px;
+    border-radius: 10px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text);
+  }
+  .err { color: var(--go-text); font-size: 12px; margin-top: 2px; display: none; }
+  .saved-note { font-size: 11px; color: var(--subtle); text-align: center; margin-top: 18px; }
+  .saved-note.ok { color: var(--ok); }
+  .saved-note.warn { color: var(--warn); }
   .session { text-align: center; width: 100%; max-width: 380px; }
   .sesscount { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; min-height: 18px; }
   .circlewrap { height: 300px; display: flex; align-items: center; justify-content: center; }
@@ -182,7 +207,8 @@
     </div>
     <div class="topbtns">
       <a class="navlink" href="../baby-tracker/" title="Baby tracker">🍼</a>
-      <a class="navlink" href="../contraction-tracker/" title="Contraction timer">⏱️</a>
+      <button class="themebtn" id="techBtn" aria-label="Technique guide">📖</button>
+      <button class="themebtn" id="remBtn" aria-label="Reminders">🔔</button>
       <button class="themebtn" id="themeBtn" aria-label="Toggle light/dark">☀️</button>
     </div>
   </div>
@@ -216,21 +242,45 @@
   <h2>Last weeks</h2>
   <div class="card"><div class="cal" id="calendar"></div></div>
 
-  <h2>Reminders</h2>
-  <div class="card">
-    <div class="remrow"><input type="checkbox" id="rem1On"><input type="time" id="rem1T" value="09:00"><span>morning</span></div>
-    <div class="remrow"><input type="checkbox" id="rem2On"><input type="time" id="rem2T" value="13:30"><span>afternoon</span></div>
-    <div class="remrow"><input type="checkbox" id="rem3On"><input type="time" id="rem3T" value="20:30"><span>evening</span></div>
-    <div class="pushstatus" id="pushStatus">Checking…</div>
-    <div class="btns">
-      <button class="primary" id="pushToggle">Enable notifications</button>
-      <button id="pushTest" style="display:none;">Send test</button>
+  <div class="saved-note" id="syncNote">Saved automatically to this device.</div>
+
+  <!-- Login gate (same family password as the baby tracker) -->
+  <div class="overlay" id="loginOverlay">
+    <div class="modal">
+      <h3>Sign in</h3>
+      <div class="field">
+        <label for="loginPass">Password</label>
+        <input type="password" id="loginPass" autocomplete="current-password">
+      </div>
+      <div class="err" id="loginErr"></div>
+      <div class="btns">
+        <button class="primary" id="loginBtn">Sign in</button>
+      </div>
     </div>
   </div>
 
-  <h2>Technique</h2>
-  <div class="card tech">
-    <h3>Find the right muscles</h3>
+  <!-- Reminders modal -->
+  <div class="overlay" id="remOverlay">
+    <div class="modal">
+      <h3>Reminders</h3>
+      <div class="remrow"><input type="checkbox" id="rem1On"><input type="time" id="rem1T" value="09:00"><span>morning</span></div>
+      <div class="remrow"><input type="checkbox" id="rem2On"><input type="time" id="rem2T" value="13:30"><span>afternoon</span></div>
+      <div class="remrow"><input type="checkbox" id="rem3On"><input type="time" id="rem3T" value="20:30"><span>evening</span></div>
+      <div class="pushstatus" id="pushStatus">Checking…</div>
+      <div class="pushstatus">Reminders arrive even with the app closed, in this phone's timezone — and stay quiet once today's 3 sessions are done.</div>
+      <div class="btns">
+        <button class="primary" id="pushToggle">Enable notifications</button>
+        <button id="pushTest" style="display:none;">Send test</button>
+      </div>
+      <div class="btns"><button id="remClose">Close</button></div>
+    </div>
+  </div>
+
+  <!-- Technique modal -->
+  <div class="overlay" id="techOverlay">
+    <div class="modal tech">
+      <h3>Technique</h3>
+      <h3>Find the right muscles</h3>
     <ul>
       <li>Imagine gently stopping wind and urine at the same time — a "squeeze and lift" inside, up and forward.</li>
       <li>Nothing should visibly move: no clenching buttocks, thighs or stomach.</li>
@@ -257,6 +307,8 @@
       <li class="flag">Exercises hurt, leaking continues past ~12 weeks, or you feel heaviness / bulging in the vagina.</li>
     </ul>
     <div class="disclaimer">This app is a training timer, not medical advice. Based on NHS / NICE-aligned pelvic floor muscle training guidance (10s holds ×10 + 10 quick squeezes, 3 sessions daily, built up gradually).</div>
+    <div class="btns"><button id="techClose">Close</button></div>
+  </div>
   </div>
 
   <!-- session player -->
@@ -281,10 +333,15 @@
 
 <script>
   const REMINDER_URL = 'https://pelvic-reminders.davidsen908.workers.dev';
-  const LOG_KEY = 'pfLog_v1';       // [{ts, hold, rest, reps, quicks, preset}]
+  const LOG_KEY = 'pfLog_v1';       // [{id, ts, hold, rest, reps, quicks, preset}]
   const CFG_KEY = 'pfCfg_v1';       // {preset, hold, rest, reps, quicks}
   const REM_KEY = 'pfRem_v1';       // [{on, t}, ...]
   const PUSH_FLAG = 'pfPushOn_v1';
+  const AUTH_KEY = 'pfAuthRoom_v1';
+  // same family password as the baby tracker; the room id uses a different
+  // salt so this app's data lives in its own KV entry
+  const PASS_SHA256 = '766724e2275657b656fcc8f94ecacadff3a798689303c5aa4d0e579ced7066b9';
+  const POLL_MS = 20000;
 
   const $ = (id) => document.getElementById(id);
 
@@ -333,8 +390,74 @@
     });
   }
 
+  // ---- login gate + sync (entry-level union merge — sessions are never
+  // deleted, so no tombstones needed) ----
+  let room = (function(){ try { return localStorage.getItem(AUTH_KEY) || null; } catch(e) { return null; } })();
+  let syncOk = null;
+  async function sha256Hex(str) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+  }
+  function showErr(id, msg) { const el = $(id); el.textContent = msg; el.style.display = 'block'; }
+  async function doLogin() {
+    const pw = $('loginPass').value;
+    if (!pw) return;
+    let hash;
+    try { hash = await sha256Hex(pw); } catch(e) { showErr('loginErr', 'Needs a secure (https) connection'); return; }
+    if (hash !== PASS_SHA256) { showErr('loginErr', 'Wrong password'); return; }
+    room = (await sha256Hex('pelvic-room-v1:' + pw)).slice(0, 32);
+    try { localStorage.setItem(AUTH_KEY, room); } catch(e) {}
+    $('loginPass').value = '';
+    $('loginOverlay').classList.remove('open');
+    setSyncNote(syncOk);
+    pull();
+    ensurePush(); // attach the room to this device's reminder subscription
+  }
+  $('loginBtn').addEventListener('click', doLogin);
+  $('loginPass').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+
+  function setSyncNote(state) {
+    const el = $('syncNote');
+    if (!room) { el.className = 'saved-note'; el.textContent = 'Not signed in — saved to this device only.'; }
+    else if (state === true) { el.className = 'saved-note ok'; el.textContent = 'Synced ✓'; }
+    else if (state === false) { el.className = 'saved-note warn'; el.textContent = 'Offline — saved on this device, will sync when connection returns.'; }
+    else { el.className = 'saved-note'; el.textContent = 'Connecting to sync…'; }
+  }
+  const logSig = (list) => list.map(s => s.id).sort().join(',');
+  function mergeSessions(a, b) {
+    const m = new Map();
+    for (const s of [...(a || []), ...(b || [])]) if (s && s.id && typeof s.ts === 'number') m.set(s.id, s);
+    return [...m.values()].sort((x, y) => x.ts - y.ts);
+  }
+  function pushState() {
+    if (!room) return;
+    fetch(`${REMINDER_URL}/state/${room}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revision: Date.now(), sessions: log }),
+    })
+      .then(r => { syncOk = r.ok; setSyncNote(syncOk); })
+      .catch(() => { syncOk = false; setSyncNote(false); });
+  }
+  async function pull() {
+    if (!room) return;
+    try {
+      const res = await fetch(`${REMINDER_URL}/state/${room}`, { cache: 'no-store' });
+      if (!res.ok) throw 0;
+      const remote = await res.json();
+      syncOk = true; setSyncNote(true);
+      if (!remote || !Array.isArray(remote.sessions)) { if (log.length) pushState(); return; }
+      const merged = mergeSessions(log, remote.sessions);
+      if (logSig(merged) !== logSig(log)) { log = merged; saveLog(); paintProgress(); }
+      if (logSig(merged) !== logSig(remote.sessions)) pushState();
+    } catch(e) {
+      syncOk = false; setSyncNote(false);
+    }
+  }
+
   // ---- log / progress ----
   let log = (function(){ try { return JSON.parse(localStorage.getItem(LOG_KEY)) || []; } catch(e) { return []; } })();
+  log.forEach(s => { if (!s.id) s.id = 's' + s.ts; }); // migrate pre-sync entries
   function saveLog() { try { localStorage.setItem(LOG_KEY, JSON.stringify(log)); } catch(e) {} }
   const dayKey = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
   function countsByDay() {
@@ -458,8 +581,9 @@
   }
   function finishSession() {
     clearInterval(sess.timer);
-    log.push({ ts: Date.now(), hold: cfg.hold, rest: cfg.rest, reps: cfg.reps, quicks: cfg.quicks, preset: cfg.preset });
+    log.push({ id: 's' + Date.now(), ts: Date.now(), hold: cfg.hold, rest: cfg.rest, reps: cfg.reps, quicks: cfg.quicks, preset: cfg.preset });
     saveLog();
+    pushState();
     tone(660); tone(880, 0.3, 0.16); if (navigator.vibrate) try { navigator.vibrate([100, 60, 100, 60, 200]); } catch(e) {}
     const today = countsByDay()[dayKey(Date.now())] || 0;
     $('doneSub').textContent = `${today} of 3 sessions today${today >= 3 ? ' — all done! 🌸' : ''}`;
@@ -516,7 +640,7 @@
     const r = await fetch(`${REMINDER_URL}/subscribe`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...sub.toJSON(), times, tz: Intl.DateTimeFormat().resolvedOptions().timeZone }),
+      body: JSON.stringify({ ...sub.toJSON(), times, tz: Intl.DateTimeFormat().resolvedOptions().timeZone, room: room || undefined }),
     });
     if (!r.ok) throw new Error('subscribe failed');
     return sub;
@@ -581,13 +705,27 @@
     try { await subscribePush(); } catch(e) {}
   }
 
+  // ---- modals ----
+  $('remBtn').addEventListener('click', () => { paintRem(); updatePushUI(); $('remOverlay').classList.add('open'); });
+  $('remClose').addEventListener('click', () => $('remOverlay').classList.remove('open'));
+  $('remOverlay').addEventListener('click', (e) => { if (e.target.id === 'remOverlay') $('remOverlay').classList.remove('open'); });
+  $('techBtn').addEventListener('click', () => $('techOverlay').classList.add('open'));
+  $('techClose').addEventListener('click', () => $('techOverlay').classList.remove('open'));
+  $('techOverlay').addEventListener('click', (e) => { if (e.target.id === 'techOverlay') $('techOverlay').classList.remove('open'); });
+
   // ---- init ----
   paintCfg();
   paintProgress();
   paintRem();
   updatePushUI();
+  setSyncNote(syncOk);
+  if (!room) $('loginOverlay').classList.add('open');
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').then(ensurePush).catch(() => {});
+  pull();
+  setInterval(pull, POLL_MS);
   setInterval(paintProgress, 60000); // roll the day over if left open
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) pull(); });
+  window.addEventListener('online', pull);
 </script>
 </body>
 </html>

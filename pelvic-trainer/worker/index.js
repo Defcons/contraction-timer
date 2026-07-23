@@ -1,12 +1,15 @@
-// Pelvic trainer reminder worker — the app itself is LOCAL-ONLY (no exercise
-// data ever leaves the phone); this worker only stores push subscriptions +
-// reminder times and nudges at those times via a cron.
-// POST /subscribe    {endpoint, keys:{p256dh,auth}, times:["09:00",...], tz}
+// Pelvic trainer worker — session-log sync + push reminders.
+// GET  /state/:room  -> stored JSON or null (session log; merged client-side)
+// PUT  /state/:room  -> store JSON body
+// POST /subscribe    {endpoint, keys:{p256dh,auth}, times:["09:00",...], tz, room?}
 // POST /unsubscribe  {endpoint}
 // POST /test         {endpoint} -> send a test push to that device
 // GET  /vapid        -> {publicKey}  (derived from the VAPID_JWK secret, so
 //                       the app never needs a key baked into its HTML)
-// KV: sub:<endpointHash> = {endpoint, keys, times, tz, sent:{"HH:MM":"YYYY-MM-DD"}}
+// KV: room:<id> = {revision, sessions:[...]},
+//     sub:<endpointHash> = {endpoint, keys, times, tz, room?, sent:{"HH:MM":"YYYY-MM-DD"}}
+// When a sub carries its room, reminders are skipped once 3 sessions are
+// already logged that local day.
 
 import { sendPush } from './webpush.js';
 
@@ -59,18 +62,33 @@ export async function sendReminders(env, now = new Date()) {
       today = new Intl.DateTimeFormat('en-CA', { timeZone: rec.tz || 'UTC' }).format(now);
     } catch { continue; } // bad tz: skip rather than spam at wrong times
     const nowMin = +hm.slice(0, 2) * 60 + +hm.slice(3, 5);
+    const dueSlots = rec.times.filter((t) => {
+      if (!TIME_RE.test(t)) return false;
+      const diff = nowMin - (+t.slice(0, 2) * 60 + +t.slice(3, 5));
+      return diff >= 0 && diff < 5 && (rec.sent && rec.sent[t]) !== today;
+    });
+    if (!dueSlots.length) continue;
+    // synced session log lets us skip the nudge when today's 3 are already done
+    let doneToday = 0;
+    if (rec.room) {
+      try {
+        const st = JSON.parse((await env.STATE.get('room:' + rec.room)) || 'null');
+        if (st && Array.isArray(st.sessions)) {
+          const dayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: rec.tz || 'UTC' });
+          doneToday = st.sessions.filter((s) => { try { return dayFmt.format(new Date(s.ts)) === today; } catch { return false; } }).length;
+        }
+      } catch {}
+    }
     let changed = false;
     let gone = false;
-    for (const t of rec.times) {
-      if (!TIME_RE.test(t)) continue;
-      const diff = nowMin - (+t.slice(0, 2) * 60 + +t.slice(3, 5));
-      if (diff < 0 || diff >= 5 || (rec.sent && rec.sent[t]) === today) continue;
+    for (const t of dueSlots) {
       (rec.sent ||= {})[t] = today;
       changed = true;
+      if (doneToday >= 3) continue; // goal already reached — stay quiet
       let status;
       try {
         status = await sendPush({ endpoint: rec.endpoint, keys: rec.keys },
-          { title: 'Pelvic Trainer', body: '🌸 Time for a pelvic floor session — about 3 minutes.', tag: 'pf-remind' },
+          { title: 'Pelvic Trainer', body: doneToday ? `🌸 Time for session ${doneToday + 1} of 3 today.` : '🌸 Time for a pelvic floor session — about 3 minutes.', tag: 'pf-remind' },
           jwk, SUBJECT, { urgency: 'high' });
       } catch { status = 0; }
       if (status === 404 || status === 410) { await env.STATE.delete(k.name); gone = true; break; }
@@ -87,6 +105,27 @@ export default {
     if (path === '/vapid' && req.method === 'GET')
       return json({ publicKey: await vapidPublicKey(env) });
 
+    const sm = path.match(/^\/state\/([a-z0-9-]{8,64})$/i);
+    if (sm) {
+      const key = 'room:' + sm[1].toLowerCase();
+      if (req.method === 'GET') {
+        const val = await env.STATE.get(key);
+        return new Response(val || 'null', { headers: { ...CORS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
+      }
+      if (req.method === 'PUT') {
+        const text = await req.text();
+        if (text.length > 200000) return new Response('too large', { status: 413, headers: CORS });
+        try {
+          const d = JSON.parse(text);
+          if (typeof d.revision !== 'number' || !Array.isArray(d.sessions)) throw 0;
+        } catch {
+          return new Response('bad json', { status: 400, headers: CORS });
+        }
+        await env.STATE.put(key, text);
+        return new Response('ok', { headers: CORS });
+      }
+    }
+
     if (path === '/subscribe' && req.method === 'POST') {
       let d;
       try {
@@ -98,6 +137,7 @@ export default {
         return new Response('bad subscription', { status: 400, headers: CORS });
       }
       const rec = { endpoint: d.endpoint, keys: { p256dh: d.keys.p256dh, auth: d.keys.auth }, times: d.times, tz: typeof d.tz === 'string' ? d.tz.slice(0, 64) : 'UTC' };
+      if (typeof d.room === 'string' && /^[a-z0-9-]{8,64}$/i.test(d.room)) rec.room = d.room.toLowerCase();
       await env.STATE.put('sub:' + await endpointHash(d.endpoint), JSON.stringify(rec));
       return new Response('ok', { headers: CORS });
     }
