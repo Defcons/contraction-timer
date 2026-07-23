@@ -1492,9 +1492,8 @@
 
   const CSV_COLS = ['date', 'time', 'type', 'duration_min', 'side', 'amount', 'unit', 'milk', 'kind', 'food', 'name', 'temp_c', 'weight_kg', 'length_cm', 'by', 'note'];
   function csvRow(e) {
-    const d = new Date(e.start);
     const v = {
-      date: d.toISOString().slice(0, 10),
+      date: dateInputVal(e.start), // local date — toISOString would shift post-midnight entries to the previous UTC day
       time: timeInputVal(e.start),
       type: e.type,
       duration_min: e.duration ? Math.round(e.duration / 60000) : '',
@@ -2053,7 +2052,7 @@
     const q = alertPrefs && alertPrefs.quiet;
     if (!q || !q.on) return false;
     let cur;
-    try { cur = new Date(now).toLocaleTimeString('en-GB', { timeZone: q.tz || 'UTC', hour12: false, hour: '2-digit', minute: '2-digit' }); } catch(e) { return false; }
+    try { cur = new Date(now).toLocaleTimeString('en-GB', { timeZone: q.tz || 'Europe/Oslo', hour12: false, hour: '2-digit', minute: '2-digit' }); } catch(e) { return false; }
     return q.from <= q.to ? cur >= q.from && cur < q.to : cur >= q.from || cur < q.to;
   }
   function dueAlarmRules(now) {

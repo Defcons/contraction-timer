@@ -58,8 +58,8 @@ export async function sendReminders(env, now = new Date()) {
     if (!rec || !Array.isArray(rec.times)) continue;
     let hm, today;
     try {
-      hm = new Intl.DateTimeFormat('en-GB', { timeZone: rec.tz || 'UTC', hour: '2-digit', minute: '2-digit', hour12: false }).format(now);
-      today = new Intl.DateTimeFormat('en-CA', { timeZone: rec.tz || 'UTC' }).format(now);
+      hm = new Intl.DateTimeFormat('en-GB', { timeZone: rec.tz || 'Europe/Oslo', hour: '2-digit', minute: '2-digit', hour12: false }).format(now);
+      today = new Intl.DateTimeFormat('en-CA', { timeZone: rec.tz || 'Europe/Oslo' }).format(now);
     } catch { continue; } // bad tz: skip rather than spam at wrong times
     const nowMin = +hm.slice(0, 2) * 60 + +hm.slice(3, 5);
     const dueSlots = rec.times.filter((t) => {
@@ -74,7 +74,7 @@ export async function sendReminders(env, now = new Date()) {
       try {
         const st = JSON.parse((await env.STATE.get('room:' + rec.room)) || 'null');
         if (st && Array.isArray(st.sessions)) {
-          const dayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: rec.tz || 'UTC' });
+          const dayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: rec.tz || 'Europe/Oslo' });
           doneToday = st.sessions.filter((s) => { try { return dayFmt.format(new Date(s.ts)) === today; } catch { return false; } }).length;
         }
       } catch {}

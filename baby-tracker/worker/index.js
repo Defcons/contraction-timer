@@ -75,7 +75,7 @@ export function inQuietHours(alerts, date) {
   if (!q || !q.on) return false;
   let cur;
   try {
-    cur = date.toLocaleTimeString('en-GB', { timeZone: q.tz || 'UTC', hour12: false, hour: '2-digit', minute: '2-digit' });
+    cur = date.toLocaleTimeString('en-GB', { timeZone: q.tz || 'Europe/Oslo', hour12: false, hour: '2-digit', minute: '2-digit' });
   } catch { return false; }
   const from = q.from || '22:00', to = q.to || '07:00';
   return from <= to ? cur >= from && cur < to : cur >= from || cur < to;
