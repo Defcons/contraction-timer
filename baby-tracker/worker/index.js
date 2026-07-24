@@ -6,6 +6,9 @@
 // POST /unsubscribe/:room     -> remove a push subscription ({endpoint})
 // POST /test/:room            -> send a test notification to all of the room's devices
 // POST /status/:room          -> { lastCron, devices, subscribed } diagnostics ({endpoint} optional)
+// POST /log/:room             -> append one entry server-side (Home Assistant etc.):
+//                                {type:'diaper'|'bottle'|'nurse'|'sleep'|'solid'|'med', ...fields, ago_min?, note?, by?}
+// GET  /summary/:room         -> small JSON for external sensors (gaps, today counts)
 // GET  /archive/:room         -> { months: ["2026-07", ...] }
 // GET  /archive/:room/:month  -> archived entries for that month
 // KV: room:<id> = hot state, subs:<id> = {"<hash>": {endpoint, keys, alerts?}} (one blob
@@ -243,7 +246,7 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
 
     const url = new URL(req.url);
-    const m = url.pathname.match(/^\/(state|subscribe|unsubscribe|test|status|archive)\/([a-z0-9-]{8,64})(?:\/(\d{4}-\d{2}))?$/i);
+    const m = url.pathname.match(/^\/(state|subscribe|unsubscribe|test|status|log|summary|archive)\/([a-z0-9-]{8,64})(?:\/(\d{4}-\d{2}))?$/i);
     if (!m) return new Response('not found', { status: 404, headers: CORS });
     const [, action, roomRaw, month] = m;
     const room = roomRaw.toLowerCase();
@@ -309,6 +312,85 @@ export default {
       const id = await endpointHash(endpoint);
       if (subs[id]) { delete subs[id]; await putSubs(env, room, subs); }
       return new Response('ok', { headers: CORS });
+    }
+
+    // Append one entry without the client merge dance — for Home Assistant &
+    // friends. Room id is the credential (same trust model as PUT /state).
+    // Tiny race vs a concurrent stale client PUT is accepted (clients repair
+    // their own entries via merge; family-scale odds are negligible).
+    if (action === 'log' && req.method === 'POST') {
+      let d;
+      try { d = JSON.parse(await req.text()); } catch { return new Response('bad json', { status: 400, headers: CORS }); }
+      const raw = await env.STATE.get(key);
+      if (!raw) return new Response('unknown room', { status: 404, headers: CORS });
+      let state;
+      try { state = JSON.parse(raw); } catch { return new Response('corrupt state', { status: 500, headers: CORS }); }
+      const now = Date.now();
+      const ago = Math.min(Math.max(+d.ago_min || 0, 0), 720) * 60000;
+      const by = ((typeof d.by === 'string' && d.by.trim()) || 'Home Assistant').slice(0, 16);
+      const num = (v, lo, hi) => { const n = +v; return isFinite(n) && n >= lo && n <= hi ? n : null; };
+      let e = null;
+      if (d.type === 'diaper') {
+        e = { id: 'd' + now, type: 'diaper', start: now - ago, kind: ['wet', 'dirty', 'both'].includes(d.kind) ? d.kind : 'wet' };
+      } else if (d.type === 'bottle') {
+        const amount = num(d.amount, 1, 500);
+        if (amount === null) return new Response('bad amount', { status: 400, headers: CORS });
+        e = { id: 'b' + now, type: 'bottle', start: now - ago, amount, unit: d.unit === 'oz' ? 'oz' : 'ml' };
+        if (['formula', 'breast', 'mixed'].includes(d.milk)) e.milk = d.milk;
+      } else if (d.type === 'nurse' || d.type === 'sleep') {
+        const dur = num(d.duration_min, 1, d.type === 'nurse' ? 180 : 960);
+        if (dur === null) return new Response('bad duration_min', { status: 400, headers: CORS });
+        const end = now - ago;
+        const start = end - dur * 60000;
+        e = { id: (d.type === 'nurse' ? 'n' : 's') + start, type: d.type, start, end, duration: end - start };
+        if (d.type === 'nurse') e.side = ['L', 'R', 'both'].includes(d.side) ? d.side : 'both';
+      } else if (d.type === 'solid') {
+        if (typeof d.food !== 'string' || !d.food.trim()) return new Response('bad food', { status: 400, headers: CORS });
+        e = { id: 'f' + now, type: 'solid', start: now - ago, food: d.food.trim().slice(0, 120) };
+      } else if (d.type === 'med') {
+        if (typeof d.name !== 'string' || !d.name.trim()) return new Response('bad name', { status: 400, headers: CORS });
+        e = { id: 'm' + now, type: 'med', start: now - ago, name: d.name.trim().slice(0, 60) };
+      } else {
+        return new Response('bad type', { status: 400, headers: CORS });
+      }
+      if (typeof d.note === 'string' && d.note.trim()) e.note = d.note.trim().slice(0, 120);
+      e.mt = now;
+      e.by = by;
+      state.entries = state.entries || [];
+      state.entries.push(e);
+      state.revision = now;
+      await env.STATE.put(key, JSON.stringify(state));
+      return json({ ok: true, entry: e });
+    }
+
+    if (action === 'summary' && req.method === 'GET') {
+      const raw = await env.STATE.get(key);
+      if (!raw) return new Response('unknown room', { status: 404, headers: CORS });
+      let s;
+      try { s = JSON.parse(raw); } catch { return json({ ok: false }, 500); }
+      const now = Date.now();
+      const entries = s.entries || [];
+      const last = (types) => { let best = null; for (const e of entries) if (types.includes(e.type)) { const t = e.end || e.start; if (best === null || t > best) best = t; } return best; };
+      let lastDiaper = null, lastDiaperKind = null;
+      for (const e of entries) if (e.type === 'diaper' && (lastDiaper === null || e.start > lastDiaper)) { lastDiaper = e.start; lastDiaperKind = e.kind || null; }
+      const dayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Oslo' });
+      const today = dayFmt.format(new Date(now));
+      const todays = entries.filter((e) => { try { return dayFmt.format(new Date(e.start)) === today; } catch { return false; } });
+      const min = (t) => (t === null ? null : Math.round((now - t) / 60000));
+      const sleeping = !!(s.active && s.active.sleep);
+      return json({
+        baby: (s.baby && s.baby.name) || null,
+        sleeping,
+        nursing: !!(s.active && s.active.nurse),
+        sinceFeedMin: s.active && s.active.nurse ? 0 : min(last(['nurse', 'bottle', 'solid'])),
+        sinceDiaperMin: min(lastDiaper),
+        lastDiaperKind,
+        awakeMin: sleeping ? null : min(last(['sleep'])),
+        asleepMin: sleeping ? min(s.active.sleep.start) : null,
+        todayFeeds: todays.filter((e) => ['nurse', 'bottle', 'solid'].includes(e.type)).length,
+        todayDiapers: todays.filter((e) => e.type === 'diaper').length,
+        todaySleepMin: Math.round(todays.filter((e) => e.type === 'sleep').reduce((n, e) => n + (e.duration || 0), 0) / 60000),
+      });
     }
 
     if (action === 'status' && req.method === 'POST') {
