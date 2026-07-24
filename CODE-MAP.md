@@ -9,7 +9,15 @@ A family of small baby apps, one folder per app, each a static page on GitHub Pa
 - **`baby-tracker/`** — feeds/diapers/sleep tracker (`index.html` + `worker/`).
 - **`pelvic-trainer/`** — postpartum pelvic floor exercise trainer (`index.html` + `worker/`).
 
-Apps cross-link via small nav icons in the header (⏱️ / 🍼) but are fully independent — separate localStorage keys, separate sync rooms, separate Workers/KV namespaces. Each `worker/` dir contains `index.js` + its own `wrangler.toml`; deploy from inside that dir with `npx wrangler deploy` (needs `wrangler login`, account davidsen908).
+Apps cross-link via small nav icons in the header (⏱️ / 🍼 / 🌸) but are fully independent — separate localStorage keys, separate sync rooms, separate Workers/KV namespaces. Each `worker/` dir contains `index.js` + its own `wrangler.toml`; deploy from inside that dir with `npx wrangler deploy` (needs `wrangler login`, account davidsen908).
+
+## KV ops budget (free tier: 100k reads / 1k writes / 1k deletes / 1k LISTS per day — see CLAUDE.md)
+
+Approximate steady state across the whole account (update when adding any recurring operation):
+
+- **Lists ~10/day** (was ~865 before 2026-07 blob-storage fix): only `dailyMaintenance` room/backup scans. NEVER add a list to a cron or request hot path.
+- **Reads ~35k/day**: baby-tracker polls (10s, ~3 visible tabs ≈ 26k) + pelvic polls (60s ≈ 1.4k) + crons (2×288 runs × ~4 reads ≈ 2.3k) + page loads. Hidden tabs don't poll.
+- **Writes ~150-400/day**: state PUTs per logged event, alerted/sent maps (batched, written only on change), cron heartbeat (≤48), sub blobs (only when actually changed).
 
 History note: the repo began as `contraction-timer` with the timer at the root; it was renamed/restructured 2026-07-19. GitHub Pages URLs moved (`/contraction-timer/` → `/baby/contraction-tracker/`) but localStorage survived since it's keyed by origin, so existing devices kept their sync room + log without re-opening a share link.
 
