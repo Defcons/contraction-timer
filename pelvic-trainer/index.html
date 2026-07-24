@@ -341,7 +341,7 @@
   // same family password as the baby tracker; the room id uses a different
   // salt so this app's data lives in its own KV entry
   const PASS_SHA256 = '766724e2275657b656fcc8f94ecacadff3a798689303c5aa4d0e579ced7066b9';
-  const POLL_MS = 20000;
+  const POLL_MS = 60000; // sessions change a few times a day — no need to poll hard
 
   const $ = (id) => document.getElementById(id);
 
@@ -722,7 +722,8 @@
   if (!room) $('loginOverlay').classList.add('open');
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').then(ensurePush).catch(() => {});
   pull();
-  setInterval(pull, POLL_MS);
+  // no polling while hidden — visibilitychange pulls the moment we're back
+  setInterval(() => { if (!document.hidden) pull(); }, POLL_MS);
   setInterval(paintProgress, 60000); // roll the day over if left open
   document.addEventListener('visibilitychange', () => { if (!document.hidden) pull(); });
   window.addEventListener('online', pull);

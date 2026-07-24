@@ -2245,7 +2245,8 @@
   if (!room) openOverlay('loginOverlay');
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').then(ensurePush).catch(() => {});
   pull();
-  setInterval(pull, POLL_MS);
+  // no polling while hidden — visibilitychange pulls the moment we're back
+  setInterval(() => { if (!document.hidden) pull(); }, POLL_MS);
   setInterval(() => { updateStats(); renderTimeline(); evalLocalAlarms(); }, 15000);
   evalLocalAlarms();
   document.addEventListener('visibilitychange', () => { if (!document.hidden) pull(); });

@@ -7,7 +7,8 @@
 // GET  /vapid        -> {publicKey}  (derived from the VAPID_JWK secret, so
 //                       the app never needs a key baked into its HTML)
 // KV: room:<id> = {revision, sessions:[...]},
-//     sub:<endpointHash> = {endpoint, keys, times, tz, room?, sent:{"HH:MM":"YYYY-MM-DD"}}
+//     subs = {"<endpointHash>": {endpoint, keys, times, tz, room?, sent:{"HH:MM":"YYYY-MM-DD"}}}
+//     (single blob so the cron never LIST-scans; legacy sub:<hash> keys migrate in lazily)
 // When a sub carries its room, reminders are skipped once 3 sessions are
 // already logged that local day.
 
@@ -47,14 +48,34 @@ async function vapidPublicKey(env) {
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
+// All subscriptions live in ONE blob so the every-5-min cron costs 1 read
+// instead of a LIST scan (KV free tier: only 1k lists/day). Legacy per-sub
+// keys are migrated in lazily and deleted.
+async function getSubs(env) {
+  const raw = await env.STATE.get('subs');
+  if (raw !== null) { try { return JSON.parse(raw); } catch { return {}; } }
+  const map = {};
+  const legacy = await env.STATE.list({ prefix: 'sub:' });
+  for (const k of legacy.keys) {
+    const v = await env.STATE.get(k.name);
+    if (v) { try { map[k.name.slice(4)] = JSON.parse(v); } catch {} }
+  }
+  await env.STATE.put('subs', JSON.stringify(map));
+  for (const k of legacy.keys) await env.STATE.delete(k.name);
+  return map;
+}
+const putSubs = (env, map) => env.STATE.put('subs', JSON.stringify(map));
+
 // Cron (*/5): send each device's due reminders once per local day per slot.
+// All sent-map updates aggregate into a single blob write per run.
 export async function sendReminders(env, now = new Date()) {
-  const list = await env.STATE.list({ prefix: 'sub:' });
-  if (!list.keys.length) return;
+  const subs = await getSubs(env);
+  const ids = Object.keys(subs);
+  if (!ids.length) return;
   const jwk = JSON.parse(env.VAPID_JWK);
-  for (const k of list.keys) {
-    let rec;
-    try { rec = JSON.parse(await env.STATE.get(k.name)); } catch { continue; }
+  let blobChanged = false;
+  for (const id of ids) {
+    const rec = subs[id];
     if (!rec || !Array.isArray(rec.times)) continue;
     let hm, today;
     try {
@@ -79,11 +100,9 @@ export async function sendReminders(env, now = new Date()) {
         }
       } catch {}
     }
-    let changed = false;
-    let gone = false;
     for (const t of dueSlots) {
       (rec.sent ||= {})[t] = today;
-      changed = true;
+      blobChanged = true;
       if (doneToday >= 3) continue; // goal already reached — stay quiet
       let status;
       try {
@@ -91,10 +110,10 @@ export async function sendReminders(env, now = new Date()) {
           { title: 'Pelvic Trainer', body: doneToday ? `🌸 Time for session ${doneToday + 1} of 3 today.` : '🌸 Time for a pelvic floor session — about 3 minutes.', tag: 'pf-remind' },
           jwk, SUBJECT, { urgency: 'high' });
       } catch { status = 0; }
-      if (status === 404 || status === 410) { await env.STATE.delete(k.name); gone = true; break; }
+      if (status === 404 || status === 410) { delete subs[id]; blobChanged = true; break; }
     }
-    if (changed && !gone) await env.STATE.put(k.name, JSON.stringify(rec));
   }
+  if (blobChanged) await putSubs(env, subs);
 }
 
 export default {
@@ -138,7 +157,12 @@ export default {
       }
       const rec = { endpoint: d.endpoint, keys: { p256dh: d.keys.p256dh, auth: d.keys.auth }, times: d.times, tz: typeof d.tz === 'string' ? d.tz.slice(0, 64) : 'UTC' };
       if (typeof d.room === 'string' && /^[a-z0-9-]{8,64}$/i.test(d.room)) rec.room = d.room.toLowerCase();
-      await env.STATE.put('sub:' + await endpointHash(d.endpoint), JSON.stringify(rec));
+      const subs = await getSubs(env);
+      const id = await endpointHash(d.endpoint);
+      const prev = subs[id];
+      if (prev && prev.sent) rec.sent = prev.sent; // keep today's already-sent markers
+      // clients re-POST on every load — skip the write when nothing changed
+      if (JSON.stringify(prev) !== JSON.stringify(rec)) { subs[id] = rec; await putSubs(env, subs); }
       return new Response('ok', { headers: CORS });
     }
 
@@ -147,7 +171,9 @@ export default {
       try { endpoint = JSON.parse(await req.text()).endpoint; if (typeof endpoint !== 'string') throw 0; } catch {
         return new Response('bad json', { status: 400, headers: CORS });
       }
-      await env.STATE.delete('sub:' + await endpointHash(endpoint));
+      const subs = await getSubs(env);
+      const id = await endpointHash(endpoint);
+      if (subs[id]) { delete subs[id]; await putSubs(env, subs); }
       return new Response('ok', { headers: CORS });
     }
 
@@ -156,9 +182,8 @@ export default {
       try { endpoint = JSON.parse(await req.text()).endpoint; if (typeof endpoint !== 'string') throw 0; } catch {
         return new Response('bad json', { status: 400, headers: CORS });
       }
-      const raw = await env.STATE.get('sub:' + await endpointHash(endpoint));
-      if (!raw) return json({ ok: false, error: 'not subscribed' }, 404);
-      const rec = JSON.parse(raw);
+      const rec = (await getSubs(env))[await endpointHash(endpoint)];
+      if (!rec) return json({ ok: false, error: 'not subscribed' }, 404);
       let status;
       try {
         status = await sendPush({ endpoint: rec.endpoint, keys: rec.keys },
