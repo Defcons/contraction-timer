@@ -8,6 +8,9 @@
 // POST /status/:room          -> { lastCron, devices, subscribed } diagnostics ({endpoint} optional)
 // POST /log/:room             -> append one entry server-side (Home Assistant etc.):
 //                                {type:'diaper'|'bottle'|'nurse'|'sleep'|'solid'|'med', ...fields, ago_min?, note?, by?}
+//                                sleep/nurse also accept {action:'start'|'stop'} to drive the live
+//                                timers ("started sleeping" / "woke up"); logging baby activity
+//                                auto-stops a running sleep just like the app does
 // GET  /summary/:room         -> small JSON for external sensors (gaps, today counts)
 // GET  /archive/:room         -> { months: ["2026-07", ...] }
 // GET  /archive/:room/:month  -> archived entries for that month
@@ -329,6 +332,46 @@ export default {
       const ago = Math.min(Math.max(+d.ago_min || 0, 0), 720) * 60000;
       const by = ((typeof d.by === 'string' && d.by.trim()) || 'Home Assistant').slice(0, 16);
       const num = (v, lo, hi) => { const n = +v; return isFinite(n) && n >= lo && n <= hi ? n : null; };
+      state.entries = state.entries || [];
+      state.active = state.active || {};
+      // logging baby activity while the sleep timer runs = baby is awake;
+      // mirror the app's autoWake (events predating the sleep leave it running)
+      const autoWake = (eventStart) => {
+        const s = state.active.sleep;
+        if (!s || eventStart <= s.start) return null;
+        const end = Math.min(eventStart, now);
+        const se = { id: 's' + s.start, type: 'sleep', start: s.start, end, duration: end - s.start, mt: now, by };
+        state.entries.push(se);
+        state.active.sleep = null;
+        return se;
+      };
+
+      // live timer control: {type:'sleep'|'nurse', action:'start'|'stop'}
+      if ((d.type === 'sleep' || d.type === 'nurse') && (d.action === 'start' || d.action === 'stop')) {
+        const slot = d.type;
+        let sleepEnded = null;
+        if (d.action === 'start') {
+          if (state.active[slot]) return json({ ok: true, already: true, running_since: state.active[slot].start });
+          const startTs = now - ago;
+          if (slot === 'nurse') sleepEnded = autoWake(startTs);
+          state.active[slot] = { start: startTs, mt: now };
+          if (slot === 'nurse') state.active[slot].side = ['L', 'R', 'both'].includes(d.side) ? d.side : 'both';
+        } else {
+          const t = state.active[slot];
+          if (!t) return json({ ok: false, error: 'no ' + slot + ' running' }, 409);
+          let end = now - ago;
+          if (end <= t.start) end = now;
+          const e = { id: (slot === 'nurse' ? 'n' : 's') + t.start, type: slot, start: t.start, end, duration: end - t.start, mt: now, by };
+          if (slot === 'nurse') e.side = t.side || 'both';
+          if (typeof d.note === 'string' && d.note.trim()) e.note = d.note.trim().slice(0, 120);
+          state.entries.push(e);
+          state.active[slot] = null;
+        }
+        state.revision = now;
+        await env.STATE.put(key, JSON.stringify(state));
+        return json({ ok: true, action: d.action, type: d.type, sleepEnded: sleepEnded || undefined });
+      }
+
       let e = null;
       if (d.type === 'diaper') {
         e = { id: 'd' + now, type: 'diaper', start: now - ago, kind: ['wet', 'dirty', 'both'].includes(d.kind) ? d.kind : 'wet' };
@@ -356,11 +399,11 @@ export default {
       if (typeof d.note === 'string' && d.note.trim()) e.note = d.note.trim().slice(0, 120);
       e.mt = now;
       e.by = by;
-      state.entries = state.entries || [];
+      const sleepEnded = d.type === 'sleep' ? null : autoWake(e.start);
       state.entries.push(e);
       state.revision = now;
       await env.STATE.put(key, JSON.stringify(state));
-      return json({ ok: true, entry: e });
+      return json({ ok: true, entry: e, sleepEnded: sleepEnded || undefined });
     }
 
     if (action === 'summary' && req.method === 'GET') {

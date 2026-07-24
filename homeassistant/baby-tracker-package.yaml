@@ -1,0 +1,389 @@
+# Baby Tracker <-> Home Assistant bridge (HA "package" file) — one file per baby.
+# This copy is written for a baby named OLIVIA; for another baby, copy the file,
+# replace "Olivia"/"olivia" throughout, and point the two secrets at the other
+# baby's room id (each baby has its own room in the tracker).
+#
+# Install:
+#   1. In configuration.yaml make sure packages are enabled:
+#        homeassistant:
+#          packages: !include_dir_named packages
+#   2. Copy this file to <config>/packages/baby_tracker_olivia.yaml
+#   3. Add to <config>/secrets.yaml (room id = credential, never publish it):
+#        olivia_tracker_log_url: https://baby-tracker-sync.<account>.workers.dev/log/<ROOM_ID>
+#        olivia_tracker_summary_url: https://baby-tracker-sync.<account>.workers.dev/summary/<ROOM_ID>
+#   4. Restart Home Assistant.
+#   5. Settings -> Voice assistants -> Expose: expose every script.olivia_*
+#      so the voice assistant can log by name.
+#
+# The aliases, descriptions, and example phrases below are what the LLM voice
+# assistant reads to map natural speech onto the right script — they are the
+# "training data", keep them rich.
+
+rest_command:
+  olivia_tracker_log:
+    url: !secret olivia_tracker_log_url
+    method: POST
+    content_type: "application/json"
+    payload: "{{ payload | tojson }}"
+
+script:
+  olivia_log_diaper:
+    alias: "Olivia: log diaper change"
+    icon: mdi:emoticon-poop
+    description: >-
+      Log that Olivia's diaper was changed. kind is 'wet' (pee only), 'dirty'
+      (poo only) or 'both' (wet and dirty). Use ago_min when it happened
+      earlier. Examples: "I changed Olivia's diaper, it was both wet and
+      dirty" -> kind=both. "Changed a poopy diaper" -> kind=dirty. "Olivia
+      had a wet diaper half an hour ago" -> kind=wet, ago_min=30. "New diaper
+      for Olivia" -> kind=wet.
+    fields:
+      kind:
+        name: Kind
+        description: "wet (pee), dirty (poo), or both"
+        required: true
+        default: wet
+        selector:
+          select:
+            options: ["wet", "dirty", "both"]
+      ago_min:
+        name: Minutes ago
+        description: How many minutes ago it happened (0 or omit = just now)
+        default: 0
+        selector: { number: { min: 0, max: 720, mode: box } }
+      note:
+        name: Note
+        description: Optional note (rash, leak, color...)
+        selector: { text: }
+    sequence:
+      - service: rest_command.olivia_tracker_log
+        data:
+          payload:
+            type: diaper
+            kind: "{{ kind | default('wet') }}"
+            ago_min: "{{ ago_min | default(0) | int }}"
+            note: "{{ note | default('') }}"
+
+  olivia_log_nurse:
+    alias: "Olivia: log finished nursing (with duration)"
+    icon: mdi:mother-nurse
+    description: >-
+      Log a FINISHED breastfeeding session for Olivia when the duration is
+      known. duration_min = minutes nursed; side = L (left), R (right) or
+      both. Examples: "Olivia nursed for 20 minutes" -> duration_min=20.
+      "She breastfed 15 minutes on the left" -> duration_min=15, side=L.
+      "Olivia ate at the breast for half an hour, both sides" ->
+      duration_min=30, side=both. For "Olivia is nursing now / started
+      nursing", use the start-nursing script instead.
+    fields:
+      duration_min:
+        name: Duration (minutes)
+        description: How long she nursed, in minutes
+        required: true
+        selector: { number: { min: 1, max: 180, mode: box } }
+      side:
+        name: Side
+        description: "Breast side: L (left), R (right), or both"
+        default: both
+        selector:
+          select:
+            options: ["L", "R", "both"]
+      ago_min:
+        name: Minutes ago
+        description: How many minutes ago the nursing ENDED (0 = just now)
+        default: 0
+        selector: { number: { min: 0, max: 720, mode: box } }
+      note:
+        name: Note
+        description: Optional note
+        selector: { text: }
+    sequence:
+      - service: rest_command.olivia_tracker_log
+        data:
+          payload:
+            type: nurse
+            duration_min: "{{ duration_min | int }}"
+            side: "{{ side | default('both') }}"
+            ago_min: "{{ ago_min | default(0) | int }}"
+            note: "{{ note | default('') }}"
+
+  olivia_start_nursing:
+    alias: "Olivia: start nursing (live timer)"
+    icon: mdi:play
+    description: >-
+      Start Olivia's live nursing timer — use when she is nursing RIGHT NOW
+      and the duration is not yet known. side = L, R or both. Examples:
+      "Olivia started nursing" / "she's breastfeeding now" / "starting to
+      nurse on the right" -> side=R. If she was asleep, the sleep is ended
+      automatically. Stop later with the stop-nursing script.
+    fields:
+      side:
+        name: Side
+        description: "Breast side: L, R, or both"
+        default: both
+        selector:
+          select:
+            options: ["L", "R", "both"]
+    sequence:
+      - service: rest_command.olivia_tracker_log
+        data:
+          payload:
+            type: nurse
+            action: start
+            side: "{{ side | default('both') }}"
+
+  olivia_stop_nursing:
+    alias: "Olivia: stop nursing (ends live timer)"
+    icon: mdi:stop
+    description: >-
+      Stop Olivia's running nursing timer and log the session. Examples:
+      "Olivia is done nursing" / "she finished breastfeeding" / "stop the
+      nursing timer".
+    sequence:
+      - service: rest_command.olivia_tracker_log
+        data:
+          payload:
+            type: nurse
+            action: stop
+
+  olivia_log_sleep:
+    alias: "Olivia: log finished sleep (with duration)"
+    icon: mdi:sleep
+    description: >-
+      Log a FINISHED sleep/nap for Olivia when the duration is known.
+      duration_min = minutes slept. Examples: "Olivia slept for 17 minutes"
+      -> duration_min=17. "She napped two and a half hours" ->
+      duration_min=150. "Olivia slept 3 hours" -> duration_min=180. For
+      "Olivia fell asleep / is sleeping now", use the started-sleeping
+      script; for "Olivia woke up", use the woke-up script.
+    fields:
+      duration_min:
+        name: Duration (minutes)
+        description: How long she slept, in minutes
+        required: true
+        selector: { number: { min: 1, max: 960, mode: box } }
+      ago_min:
+        name: Minutes ago
+        description: How many minutes ago she WOKE from this sleep (0 = just now)
+        default: 0
+        selector: { number: { min: 0, max: 720, mode: box } }
+      note:
+        name: Note
+        description: Optional note
+        selector: { text: }
+    sequence:
+      - service: rest_command.olivia_tracker_log
+        data:
+          payload:
+            type: sleep
+            duration_min: "{{ duration_min | int }}"
+            ago_min: "{{ ago_min | default(0) | int }}"
+            note: "{{ note | default('') }}"
+
+  olivia_started_sleeping:
+    alias: "Olivia: started sleeping (live timer)"
+    icon: mdi:weather-night
+    description: >-
+      Start Olivia's live sleep timer — use when she just fell asleep and is
+      sleeping RIGHT NOW. Examples: "Olivia started sleeping" / "she fell
+      asleep" / "Olivia is napping now" / "she went down for a nap 10
+      minutes ago" -> ago_min=10. End it later with the woke-up script.
+    fields:
+      ago_min:
+        name: Minutes ago
+        description: How many minutes ago she fell asleep (0 = just now)
+        default: 0
+        selector: { number: { min: 0, max: 720, mode: box } }
+    sequence:
+      - service: rest_command.olivia_tracker_log
+        data:
+          payload:
+            type: sleep
+            action: start
+            ago_min: "{{ ago_min | default(0) | int }}"
+
+  olivia_woke_up:
+    alias: "Olivia: woke up (ends live sleep timer)"
+    icon: mdi:weather-sunny
+    description: >-
+      End Olivia's running sleep timer and log the sleep. Examples: "Olivia
+      woke up" / "she's awake" / "Olivia just woke from her nap" / "she woke
+      up 5 minutes ago" -> ago_min=5.
+    fields:
+      ago_min:
+        name: Minutes ago
+        description: How many minutes ago she woke (0 = just now)
+        default: 0
+        selector: { number: { min: 0, max: 720, mode: box } }
+    sequence:
+      - service: rest_command.olivia_tracker_log
+        data:
+          payload:
+            type: sleep
+            action: stop
+            ago_min: "{{ ago_min | default(0) | int }}"
+
+  olivia_log_bottle:
+    alias: "Olivia: log bottle feed"
+    icon: mdi:baby-bottle
+    description: >-
+      Log that Olivia drank a bottle. amount = volume (ml unless unit=oz);
+      milk = formula, breast (pumped breast milk) or mixed. Examples: "Olivia
+      drank a 120 ml bottle of formula" -> amount=120, milk=formula. "Gave
+      her 80 ml of pumped milk" -> amount=80, milk=breast. "Bottle-fed
+      Olivia 100 ml an hour ago" -> amount=100, ago_min=60.
+    fields:
+      amount:
+        name: Amount
+        description: How much she drank (ml unless unit says oz)
+        required: true
+        selector: { number: { min: 1, max: 500, mode: box } }
+      unit:
+        name: Unit
+        description: "ml or oz"
+        default: ml
+        selector:
+          select:
+            options: ["ml", "oz"]
+      milk:
+        name: Milk type
+        description: "formula, breast (pumped breast milk), or mixed"
+        default: formula
+        selector:
+          select:
+            options: ["formula", "breast", "mixed"]
+      ago_min:
+        name: Minutes ago
+        description: How many minutes ago (0 = just now)
+        default: 0
+        selector: { number: { min: 0, max: 720, mode: box } }
+      note:
+        name: Note
+        description: Optional note (e.g. spit up after)
+        selector: { text: }
+    sequence:
+      - service: rest_command.olivia_tracker_log
+        data:
+          payload:
+            type: bottle
+            amount: "{{ amount | int }}"
+            unit: "{{ unit | default('ml') }}"
+            milk: "{{ milk | default('formula') }}"
+            ago_min: "{{ ago_min | default(0) | int }}"
+            note: "{{ note | default('') }}"
+
+  olivia_log_solids:
+    alias: "Olivia: log solid food"
+    icon: mdi:silverware-spoon
+    description: >-
+      Log solid food Olivia ate. food = short description of what and how
+      much. Examples: "Fed Olivia 2 carrots" -> food="2 carrots". "Olivia
+      ate pureed apple" -> food="pureed apple". "She had porridge for
+      breakfast" -> food="porridge". "Fed Olivia 5 carrots this morning at
+      nine" -> food="5 carrots" with ago_min set accordingly.
+    fields:
+      food:
+        name: What she ate
+        description: Short description, e.g. "2 carrots" or "pureed apple"
+        required: true
+        selector: { text: }
+      ago_min:
+        name: Minutes ago
+        description: How many minutes ago she ate (0 = just now)
+        default: 0
+        selector: { number: { min: 0, max: 720, mode: box } }
+      note:
+        name: Note
+        description: Optional note
+        selector: { text: }
+    sequence:
+      - service: rest_command.olivia_tracker_log
+        data:
+          payload:
+            type: solid
+            food: "{{ food }}"
+            ago_min: "{{ ago_min | default(0) | int }}"
+            note: "{{ note | default('') }}"
+
+  olivia_log_medicine:
+    alias: "Olivia: log medicine"
+    icon: mdi:pill
+    description: >-
+      Log medicine given to Olivia. name = what was given. Examples: "Gave
+      Olivia her vitamin D drops" -> name="Vitamin D drops". "Olivia got
+      paracetamol an hour ago" -> name="paracetamol", ago_min=60.
+    fields:
+      name:
+        name: Medicine
+        description: What was given, e.g. "Vitamin D drops"
+        required: true
+        selector: { text: }
+      ago_min:
+        name: Minutes ago
+        description: How many minutes ago (0 = just now)
+        default: 0
+        selector: { number: { min: 0, max: 720, mode: box } }
+      note:
+        name: Note
+        description: Optional note
+        selector: { text: }
+    sequence:
+      - service: rest_command.olivia_tracker_log
+        data:
+          payload:
+            type: med
+            name: "{{ name }}"
+            ago_min: "{{ ago_min | default(0) | int }}"
+            note: "{{ note | default('') }}"
+
+# ---- read side: one REST sensor polls /summary (keep scan_interval >= 120s —
+# it costs KV read quota), template sensors expose friendly entities so the
+# voice assistant can also ANSWER questions ("when did Olivia last eat?",
+# "is Olivia sleeping?", "how many diapers today?").
+sensor:
+  - platform: rest
+    name: olivia_tracker_summary
+    resource: !secret olivia_tracker_summary_url
+    scan_interval: 120
+    value_template: "{{ value_json.sinceDiaperMin }}"
+    json_attributes:
+      - baby
+      - sleeping
+      - nursing
+      - sinceFeedMin
+      - sinceDiaperMin
+      - lastDiaperKind
+      - awakeMin
+      - asleepMin
+      - todayFeeds
+      - todayDiapers
+      - todaySleepMin
+
+template:
+  - sensor:
+      - name: "Olivia minutes since last feed"
+        unit_of_measurement: "min"
+        icon: mdi:baby-bottle-outline
+        state: "{{ state_attr('sensor.olivia_tracker_summary', 'sinceFeedMin') }}"
+      - name: "Olivia minutes since last diaper change"
+        unit_of_measurement: "min"
+        icon: mdi:emoticon-poop
+        state: "{{ state_attr('sensor.olivia_tracker_summary', 'sinceDiaperMin') }}"
+      - name: "Olivia awake for minutes"
+        unit_of_measurement: "min"
+        icon: mdi:weather-sunny
+        state: "{{ state_attr('sensor.olivia_tracker_summary', 'awakeMin') }}"
+      - name: "Olivia feeds today"
+        icon: mdi:counter
+        state: "{{ state_attr('sensor.olivia_tracker_summary', 'todayFeeds') }}"
+      - name: "Olivia diapers today"
+        icon: mdi:counter
+        state: "{{ state_attr('sensor.olivia_tracker_summary', 'todayDiapers') }}"
+      - name: "Olivia sleep today minutes"
+        unit_of_measurement: "min"
+        icon: mdi:sleep
+        state: "{{ state_attr('sensor.olivia_tracker_summary', 'todaySleepMin') }}"
+  - binary_sensor:
+      - name: "Olivia is sleeping"
+        icon: mdi:sleep
+        state: "{{ state_attr('sensor.olivia_tracker_summary', 'sleeping') }}"
