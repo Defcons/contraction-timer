@@ -1,5 +1,15 @@
 # Development rules
 
+## Privacy in this PUBLIC repo (MANDATORY)
+
+This repo is public. Never commit personal data — not in files AND not in
+commit messages: family member names, birth dates, room ids / share links /
+password hashes of new secrets, or anything identifying. Personal
+configuration belongs in synced app state (server-side), HA's private
+secrets.yaml/config, or gitignored files (like `backups/`). Keep committed
+examples name-neutral ("the baby"). The Cloudflare account handle is
+unavoidably visible in the workers.dev URLs; don't add more than that.
+
 ## Quota-aware design (MANDATORY)
 
 Everything in this repo runs on free tiers (Cloudflare Workers/KV/Pages). Free
