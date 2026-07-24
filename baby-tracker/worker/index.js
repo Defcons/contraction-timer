@@ -8,7 +8,8 @@
 // POST /status/:room          -> { lastCron, devices, subscribed } diagnostics ({endpoint} optional)
 // GET  /archive/:room         -> { months: ["2026-07", ...] }
 // GET  /archive/:room/:month  -> archived entries for that month
-// KV: room:<id> = hot state, sub:<id>:<hash> = {endpoint, keys, alerts?},
+// KV: room:<id> = hot state, subs:<id> = {"<hash>": {endpoint, keys, alerts?}} (one blob
+//     per room; legacy sub:<id>:<hash> keys are lazily migrated in), subsrooms = [room,...],
 //     alerted:<id> = {"<hash>:<rule>": lastFiredTs}, archive:<id>:<YYYY-MM> = old entries,
 //     backup:<id>:<YYYY-MM-DD> = daily snapshots (14 kept), maint:last = date gate,
 //     cron:last = last alert-check ts (written at most every 30 min to spare the KV write quota)
@@ -37,14 +38,39 @@ async function endpointHash(endpoint) {
   return [...new Uint8Array(d)].slice(0, 8).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function roomSubs(env, room) {
-  const list = await env.STATE.list({ prefix: `sub:${room}:` });
-  const subs = [];
-  for (const k of list.keys) {
+// ---- subscription storage ----
+// One blob per room (subs:<room> = {<endpointHash>: rec}) plus a rooms index
+// (subsrooms = [room,...]) so the every-5-min cron reads a couple of keys
+// instead of LIST-scanning — KV free tier allows only 1k lists/day and the
+// old scheme burned ~600/day here alone. Legacy per-sub keys (sub:<room>:<id>)
+// are migrated lazily on first access and then deleted.
+async function getSubs(env, room) {
+  const raw = await env.STATE.get('subs:' + room);
+  if (raw !== null) { try { return JSON.parse(raw); } catch { return {}; } }
+  const map = {};
+  const legacy = await env.STATE.list({ prefix: `sub:${room}:` });
+  for (const k of legacy.keys) {
     const v = await env.STATE.get(k.name);
-    if (v) { try { subs.push({ key: k.name, sub: JSON.parse(v) }); } catch {} }
+    if (v) { try { map[k.name.split(':')[2]] = JSON.parse(v); } catch {} }
   }
-  return subs;
+  await env.STATE.put('subs:' + room, JSON.stringify(map));
+  for (const k of legacy.keys) await env.STATE.delete(k.name);
+  return map;
+}
+const putSubs = (env, room, map) => env.STATE.put('subs:' + room, JSON.stringify(map));
+async function addRoomToIndex(env, room) {
+  let rooms = [];
+  try { rooms = JSON.parse((await env.STATE.get('subsrooms')) || '[]'); } catch {}
+  if (!rooms.includes(room)) { rooms.push(room); await env.STATE.put('subsrooms', JSON.stringify(rooms)); }
+}
+async function getRooms(env) {
+  const raw = await env.STATE.get('subsrooms');
+  if (raw !== null) { try { return JSON.parse(raw); } catch { return []; } }
+  // one-time discovery from legacy per-sub keys
+  const list = await env.STATE.list({ prefix: 'sub:' });
+  const rooms = [...new Set(list.keys.map((k) => k.name.split(':')[1]))];
+  await env.STATE.put('subsrooms', JSON.stringify(rooms));
+  return rooms;
 }
 
 // Send payload to every device in the room; prune subscriptions the push
@@ -52,14 +78,17 @@ async function roomSubs(env, room) {
 async function pushRoom(env, room, payload) {
   const jwk = JSON.parse(env.VAPID_JWK);
   const urgency = payload.crit === 'low' ? 'normal' : 'high';
+  const subs = await getSubs(env, room);
   const results = [];
-  for (const { key, sub } of await roomSubs(env, room)) {
+  let changed = false;
+  for (const [id, sub] of Object.entries(subs)) {
     let status;
     try { status = await sendPush(sub, payload, jwk, SUBJECT, { urgency }); }
     catch { status = 0; }
-    if (status === 404 || status === 410) await env.STATE.delete(key);
+    if (status === 404 || status === 410) { delete subs[id]; changed = true; }
     results.push(status);
   }
+  if (changed) await putSubs(env, room, subs);
   return results;
 }
 
@@ -114,18 +143,18 @@ export function dueAlerts(state, now) {
 export async function checkAlerts(env) { // exported for tests
   const now = Date.now();
   const jwk = JSON.parse(env.VAPID_JWK);
-  const list = await env.STATE.list({ prefix: 'sub:' });
-  const rooms = new Set(list.keys.map((k) => k.name.split(':')[1]));
-  for (const room of rooms) {
+  for (const room of await getRooms(env)) {
+    const subsMap = await getSubs(env, room);
+    if (!Object.keys(subsMap).length) continue;
     const raw = await env.STATE.get('room:' + room);
     if (!raw) continue;
     let state;
     try { state = JSON.parse(raw); } catch { continue; }
     // evaluate each device's own rules (fallback: the legacy shared config)
     const devices = [];
-    for (const { key, sub } of await roomSubs(env, room)) {
+    for (const [id, sub] of Object.entries(subsMap)) {
       const cfg = sub.alerts || state.alerts || {};
-      devices.push({ id: key.split(':')[2], key, sub, cfg, due: dueAlerts({ ...state, alerts: cfg }, now) });
+      devices.push({ id, sub, cfg, due: dueAlerts({ ...state, alerts: cfg }, now) });
     }
     const alertedKey = 'alerted:' + room;
     let alerted = {};
@@ -136,6 +165,7 @@ export async function checkAlerts(env) { // exported for tests
     for (const k of Object.keys(alerted)) {
       if (!dueKeys.has(k)) { delete alerted[k]; changed = true; } // condition reset -> next crossing alerts immediately
     }
+    let subsChanged = false;
     for (const dev of devices) {
       if (inQuietHours(dev.cfg, new Date(now))) continue; // per-device quiet hours
       for (const d of dev.due) {
@@ -146,11 +176,12 @@ export async function checkAlerts(env) { // exported for tests
         try {
           status = await sendPush(dev.sub, { title: 'Baby Tracker', body: d.body, tag: 'bt-' + d.key, crit: d.crit }, jwk, SUBJECT, { urgency: d.crit === 'low' ? 'normal' : 'high' });
         } catch { status = 0; }
-        if (status === 404 || status === 410) await env.STATE.delete(dev.key);
+        if (status === 404 || status === 410) { delete subsMap[dev.id]; subsChanged = true; }
         alerted[ak] = now;
         changed = true;
       }
     }
+    if (subsChanged) await putSubs(env, room, subsMap);
     if (changed) await env.STATE.put(alertedKey, JSON.stringify(alerted));
   }
   // heartbeat for the in-app status line; throttled to respect the KV write quota
@@ -262,7 +293,10 @@ export default {
       const rec = { endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth } };
       // per-device alert prefs ride along with the subscription
       if (sub.alerts && typeof sub.alerts === 'object' && JSON.stringify(sub.alerts).length <= 4096) rec.alerts = sub.alerts;
-      await env.STATE.put(`sub:${room}:${id}`, JSON.stringify(rec));
+      const subs = await getSubs(env, room);
+      // clients re-POST on every load — skip the write when nothing changed
+      if (JSON.stringify(subs[id]) !== JSON.stringify(rec)) { subs[id] = rec; await putSubs(env, room, subs); }
+      await addRoomToIndex(env, room);
       return new Response('ok', { headers: CORS });
     }
 
@@ -271,21 +305,19 @@ export default {
       try { endpoint = JSON.parse(await req.text()).endpoint; if (typeof endpoint !== 'string') throw 0; } catch {
         return new Response('bad json', { status: 400, headers: CORS });
       }
-      await env.STATE.delete(`sub:${room}:${await endpointHash(endpoint)}`);
+      const subs = await getSubs(env, room);
+      const id = await endpointHash(endpoint);
+      if (subs[id]) { delete subs[id]; await putSubs(env, room, subs); }
       return new Response('ok', { headers: CORS });
     }
 
     if (action === 'status' && req.method === 'POST') {
       let endpoint = null;
       try { endpoint = JSON.parse(await req.text()).endpoint || null; } catch {}
-      const subs = (await env.STATE.list({ prefix: `sub:${room}:` })).keys;
-      let subscribed = false;
-      if (typeof endpoint === 'string') {
-        const id = await endpointHash(endpoint);
-        subscribed = subs.some((k) => k.name.endsWith(':' + id));
-      }
+      const subs = await getSubs(env, room);
+      const subscribed = typeof endpoint === 'string' ? !!subs[await endpointHash(endpoint)] : false;
       const lastCron = +(await env.STATE.get('cron:last')) || null;
-      return json({ lastCron, devices: subs.length, subscribed });
+      return json({ lastCron, devices: Object.keys(subs).length, subscribed });
     }
 
     if (action === 'test' && req.method === 'POST') {
