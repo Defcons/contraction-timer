@@ -501,6 +501,10 @@
         <label for="loginPass">Password</label>
         <input type="password" id="loginPass" autocomplete="current-password">
       </div>
+      <div class="field">
+        <label for="loginBaby">Baby name (only for a 2nd+ baby)</label>
+        <input type="text" id="loginBaby" maxlength="20" placeholder="Leave empty for your first baby">
+      </div>
       <div class="err" id="loginErr"></div>
       <div class="btns">
         <button class="primary" id="loginBtn">Sign in</button>
@@ -512,6 +516,13 @@
   <div class="overlay" id="alertsOverlay">
     <div class="modal">
       <h3>Alerts &amp; notifications</h3>
+      <div class="field">
+        <label>Baby (shared between devices)</label>
+        <div class="row2">
+          <input type="text" id="babyName" maxlength="20" placeholder="Name">
+          <input type="date" id="babyBorn">
+        </div>
+      </div>
       <div class="field">
         <label>This device</label>
         <input type="text" id="deviceName" maxlength="16" placeholder="Who logs from here? e.g. Grandma" style="margin-bottom:8px;">
@@ -532,6 +543,7 @@
         <div class="pushstatus" id="srvStatus" style="margin-top:6px;"></div>
       </div>
       <div class="btns">
+        <button id="switchBaby">Switch baby / sign out</button>
         <button id="alertsClose">Close</button>
       </div>
     </div>
@@ -874,10 +886,14 @@
     };
   }
 
+  function defaultBaby() { return { name: '', born: '2026-07-17' }; }
+
   let entries = [];              // hot-window entries (older ones live in server archives)
   let active = { sleep: null, nurse: null }; // in-progress timers: {start, mt[, side]}
   let alerts = defaultAlerts();  // shared alert rules (synced; evaluated by the worker cron)
   let alertsRev = 0;             // last-modified ts of alerts (merge tiebreaker)
+  let baby = defaultBaby();      // baby identity (synced; one room = one baby)
+  let babyRev = 0;
   let deleted = {};              // tombstones {entryId: deleteTs} so deletes survive merges
   let archivedBefore = 0;        // server watermark: entries older than this are archived
   let deviceName = (function(){ try { return localStorage.getItem(NAME_KEY) || ''; } catch(e) { return ''; } })();
@@ -930,7 +946,10 @@
     let hash;
     try { hash = await sha256Hex(pw); } catch(e) { showErr('loginErr', 'Needs a secure (https) connection'); return; }
     if (hash !== PASS_SHA256) { showErr('loginErr', 'Wrong password'); return; }
-    room = (await sha256Hex('baby-room-v1:' + pw)).slice(0, 32);
+    // one room = one baby: an optional baby name salts the room id, so the same
+    // family password opens a separate log per baby (empty = the original room)
+    const slug = document.getElementById('loginBaby').value.trim().toLowerCase();
+    room = (await sha256Hex(slug ? `baby-room-v1:${pw}:${slug}` : 'baby-room-v1:' + pw)).slice(0, 32);
     try { localStorage.setItem(AUTH_KEY, room); } catch(e) {}
     loginPass.value = '';
     closeOverlay('loginOverlay');
@@ -942,7 +961,7 @@
 
   // ---- persistence ----
   function currentState() {
-    return { revision, entries, active, alerts, alertsRev, deleted, archivedBefore };
+    return { revision, entries, active, alerts, alertsRev, baby, babyRev, deleted, archivedBefore };
   }
   function adopt(s) {
     revision = s.revision;
@@ -950,6 +969,8 @@
     active = s.active;
     alerts = s.alerts || defaultAlerts();
     alertsRev = s.alertsRev;
+    baby = s.baby || defaultBaby();
+    babyRev = s.babyRev || 0;
     deleted = s.deleted;
     archivedBefore = s.archivedBefore;
   }
@@ -1013,6 +1034,7 @@
         save();
         updateActionUI();
         paintAlertRules();
+        paintBaby();
         render();
       }
       if (changedRemote) { revision = Date.now(); save(); pushState(); }
@@ -1133,7 +1155,7 @@
   // Gaps turn orange (warn) then red (late) at age-appropriate limits that
   // loosen as the baby grows: newborns feed every 2-3h and have 45-60 min
   // wake windows; by a year, feeds spread to 4-5h and wake windows reach ~4h.
-  const BIRTH_TS = new Date(2026, 6, 17).getTime(); // born 17 Jul 2026
+  // The birth date comes from the synced baby config (🔔 modal).
   const AGE_BANDS = [ // [maxAgeWeeks, feedWarn, feedRed, diaperWarn, diaperRed, awakeWarn, awakeRed] (minutes)
     [6,        150, 210, 180, 240,  60,  90],
     [13,       180, 240, 180, 240,  75, 105],
@@ -1142,10 +1164,19 @@
     [52,       240, 300, 300, 360, 180, 240],
     [Infinity, 300, 360, 300, 360, 240, 330],
   ];
+  function babyBornTs() {
+    const m = (baby.born || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const t = m ? new Date(+m[1], +m[2] - 1, +m[3]).getTime() : NaN;
+    return isNaN(t) ? new Date(2026, 6, 17).getTime() : t;
+  }
   function ageThresholds(now) {
-    const weeks = (now - BIRTH_TS) / (7 * 86400000);
+    const weeks = (now - babyBornTs()) / (7 * 86400000);
     const b = AGE_BANDS.find(r => weeks < r[0]) || AGE_BANDS[AGE_BANDS.length - 1];
     return { feed: [b[1], b[2]], diaper: [b[3], b[4]], awake: [b[5], b[6]] };
+  }
+  function paintBaby() {
+    document.querySelector('.top h1').textContent = baby.name || 'Baby Tracker';
+    document.title = baby.name ? `${baby.name} — Baby Tracker` : 'Baby Tracker';
   }
 
   // ---- stats / header ----
@@ -2158,6 +2189,45 @@
     }
   }
 
+  // baby identity (name + birth date) — synced, shared by all devices in the room
+  const babyNameInput = document.getElementById('babyName');
+  const babyBornInput = document.getElementById('babyBorn');
+  function bumpBaby() {
+    babyRev = Date.now();
+    touch();
+    paintBaby();
+    updateStats(); // age thresholds may have moved
+  }
+  babyNameInput.addEventListener('change', () => { baby.name = babyNameInput.value.trim(); bumpBaby(); });
+  babyBornInput.addEventListener('change', () => {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(babyBornInput.value)) { baby.born = babyBornInput.value; bumpBaby(); }
+  });
+
+  // switch baby / sign out: the log lives safely on the server per room — this
+  // only clears this device's local copy and lets you sign into another room
+  document.getElementById('switchBaby').addEventListener('click', async () => {
+    const msg = syncOk === true
+      ? `Sign out on this device? ${baby.name ? baby.name + "'s" : 'The'} log stays safely synced on the server — sign back in anytime (add a baby name for a different baby's log).`
+      : '⚠ This device is NOT currently synced — any unsynced changes on it would be lost. Sign out anyway?';
+    if (!confirm(msg)) return;
+    try { // stop this room's push alerts reaching this device
+      if (localStorage.getItem(PUSH_FLAG) && pushSupported()) {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) {
+          await fetch(`${SYNC_URL}/unsubscribe/${room}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: sub.endpoint }) });
+          await sub.unsubscribe();
+        }
+      }
+    } catch(e) {}
+    try {
+      localStorage.removeItem(AUTH_KEY);
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(PUSH_FLAG);
+    } catch(e) {}
+    location.reload();
+  });
+
   // per-device name stamped onto entries this device logs
   const deviceNameInput = document.getElementById('deviceName');
   deviceNameInput.addEventListener('change', () => {
@@ -2261,6 +2331,8 @@
   }
 
   document.getElementById('alertsBtn').addEventListener('click', () => {
+    babyNameInput.value = baby.name;
+    babyBornInput.value = baby.born;
     deviceNameInput.value = deviceName;
     paintAlertRules();
     updatePushUI();
@@ -2279,6 +2351,7 @@
     return seeded;
   })();
   updateActionUI();
+  paintBaby();
   render();
   setSyncNote(syncOk);
   if (!room) openOverlay('loginOverlay');

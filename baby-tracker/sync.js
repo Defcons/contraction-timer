@@ -3,7 +3,7 @@
 //
 // State shape (all fields optional on the wire; normalizeState fills gaps):
 //   { revision, entries[], active:{sleep,nurse}, alerts, alertsRev,
-//     deleted:{id:ts}, archivedBefore }
+//     baby:{name,born}, babyRev, deleted:{id:ts}, archivedBefore }
 // Entries carry `mt` (last-modified ts) for per-entry conflict resolution and
 // optionally `by` (device name). Deletes are tombstones so they survive merge.
 // `archivedBefore` is the server-set watermark: entries older than it live in
@@ -17,6 +17,8 @@ function normalizeState(s) {
     active: s.active || { sleep: null, nurse: null },
     alerts: s.alerts || null,
     alertsRev: s.alertsRev || 0,
+    baby: s.baby || null,
+    babyRev: s.babyRev || 0,
     deleted: s.deleted || {},
     archivedBefore: s.archivedBefore || 0,
   };
@@ -62,6 +64,8 @@ function mergeState(a, b, now) {
 
   // alerts config: small, whole-object last-writer-wins by alertsRev
   const alerts = a.alertsRev >= b.alertsRev ? (a.alerts || b.alerts) : (b.alerts || a.alerts);
+  // baby identity (name + birth date): same whole-object LWW
+  const baby = a.babyRev >= b.babyRev ? (a.baby || b.baby) : (b.baby || a.baby);
 
   return {
     revision: Math.max(a.revision, b.revision),
@@ -69,6 +73,8 @@ function mergeState(a, b, now) {
     active,
     alerts,
     alertsRev: Math.max(a.alertsRev, b.alertsRev),
+    baby,
+    babyRev: Math.max(a.babyRev, b.babyRev),
     deleted,
     archivedBefore,
   };
@@ -91,6 +97,8 @@ function stateSig(s) {
     n.active,
     n.alerts,
     n.alertsRev,
+    n.baby,
+    n.babyRev,
     n.archivedBefore,
   ]);
 }
