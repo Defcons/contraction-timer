@@ -85,6 +85,9 @@
   .stat .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 5px; }
   .stat .value { font-size: 19px; font-weight: 600; }
   .stat .value.active { color: var(--accent); }
+  /* age-aware urgency: gap approaching / past the age-appropriate limit */
+  .stat .value.warn, .actionbtn .sub2.warn { color: var(--warn); font-weight: 600; }
+  .stat .value.late, .actionbtn .sub2.late { color: var(--go-text); font-weight: 600; }
 
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 10px; margin-top: 22px; }
 
@@ -1126,6 +1129,25 @@
     return '';
   }
 
+  // ---- age-aware urgency coloring for the "X ago" hints ----
+  // Gaps turn orange (warn) then red (late) at age-appropriate limits that
+  // loosen as the baby grows: newborns feed every 2-3h and have 45-60 min
+  // wake windows; by a year, feeds spread to 4-5h and wake windows reach ~4h.
+  const BIRTH_TS = new Date(2026, 6, 17).getTime(); // born 17 Jul 2026
+  const AGE_BANDS = [ // [maxAgeWeeks, feedWarn, feedRed, diaperWarn, diaperRed, awakeWarn, awakeRed] (minutes)
+    [6,        150, 210, 180, 240,  60,  90],
+    [13,       180, 240, 180, 240,  75, 105],
+    [26,       210, 270, 240, 300, 120, 150],
+    [39,       240, 300, 240, 300, 150, 195],
+    [52,       240, 300, 300, 360, 180, 240],
+    [Infinity, 300, 360, 300, 360, 240, 330],
+  ];
+  function ageThresholds(now) {
+    const weeks = (now - BIRTH_TS) / (7 * 86400000);
+    const b = AGE_BANDS.find(r => weeks < r[0]) || AGE_BANDS[AGE_BANDS.length - 1];
+    return { feed: [b[1], b[2]], diaper: [b[3], b[4]], awake: [b[5], b[6]] };
+  }
+
   // ---- stats / header ----
   function latestFeedTime() {
     let best = null;
@@ -1156,30 +1178,41 @@
   }
   function updateStats() {
     const now = Date.now();
+    const th = ageThresholds(now);
+    const urg = (t, [warn, red]) => t == null ? '' : now - t >= red * 60000 ? ' late' : now - t >= warn * 60000 ? ' warn' : '';
+
     const feedT = latestFeedTime();
-    document.getElementById('sinceFeed').textContent = active.nurse
+    const feedCls = active.nurse ? '' : urg(feedT, th.feed); // nursing right now = feed being handled
+    const sinceFeedEl = document.getElementById('sinceFeed');
+    sinceFeedEl.textContent = active.nurse
       ? `Nursing · ${fmtShort(now - active.nurse.start)}`
       : (feedT ? fmtShort(now - feedT) + ' ago' : '—');
+    sinceFeedEl.className = 'value' + feedCls;
 
     const diaperT = latestDiaperTime();
-    document.getElementById('sinceDiaper').textContent = diaperT ? fmtShort(now - diaperT) + ' ago' : '—';
+    const diaperCls = urg(diaperT, th.diaper);
+    const sinceDiaperEl = document.getElementById('sinceDiaper');
+    sinceDiaperEl.textContent = diaperT ? fmtShort(now - diaperT) + ' ago' : '—';
+    sinceDiaperEl.className = 'value' + diaperCls;
 
     const sleepLabel = document.getElementById('sleepLabel');
     const sleepVal = document.getElementById('sleepVal');
+    let awakeCls = '';
     if (active.sleep) {
       sleepLabel.textContent = 'Asleep for';
       sleepVal.textContent = fmtShort(now - active.sleep.start);
-      sleepVal.classList.add('active');
+      sleepVal.className = 'value active';
     } else {
-      sleepVal.classList.remove('active');
       const lastSleepEnd = entries.filter(e => e.type === 'sleep').map(e => e.end).sort((a,b)=>b-a)[0];
       if (lastSleepEnd) {
+        awakeCls = urg(lastSleepEnd, th.awake);
         sleepLabel.textContent = 'Awake for';
         sleepVal.textContent = fmtShort(now - lastSleepEnd);
       } else {
         sleepLabel.textContent = 'Sleep';
         sleepVal.textContent = '—';
       }
+      sleepVal.className = 'value' + awakeCls;
     }
 
     const today0 = startOfToday();
@@ -1188,11 +1221,17 @@
     const diaperCount = todays.filter(e => e.type === 'diaper').length;
     document.getElementById('todaySummary').textContent = `${feedCount} feed${feedCount===1?'':'s'} · ${diaperCount} diaper${diaperCount===1?'':'s'}`;
 
-    // "(X ago)" on the action buttons; running timers own their own sub text
+    // "(X ago)" on the action buttons; running timers own their own sub text.
+    // Nurse/diaper/sleep subs carry the age-aware urgency color (nurse uses the
+    // overall feed gap — a bottle also resets it).
     if (!active.sleep) sleepBtnSub.textContent = agoOr('sleep', 'Tap to start');
+    sleepBtnSub.className = 'sub2' + (active.sleep ? '' : awakeCls);
     if (!active.nurse) nurseBtnSub.textContent = agoOr('nurse', 'Tap to start');
+    nurseBtnSub.className = 'sub2' + feedCls;
     document.getElementById('bottleBtnSub').textContent = agoOr('bottle', 'Amount & type');
-    document.getElementById('diaperBtnSub').textContent = agoOr('diaper', 'Wet / dirty');
+    const diaperBtnSubEl = document.getElementById('diaperBtnSub');
+    diaperBtnSubEl.textContent = agoOr('diaper', 'Wet / dirty');
+    diaperBtnSubEl.className = 'sub2' + diaperCls;
     document.getElementById('solidBtnSub').textContent = agoOr('solid', 'What & when');
     document.getElementById('pumpBtnSub').textContent = agoOr('pump', 'Amount & side');
     document.getElementById('medBtnSub').textContent = agoOr('med', 'Vitamins etc.');
@@ -1223,9 +1262,9 @@
   const TL_TYPES = [
     { type: 'sleep', ico: '😴' },
     { type: 'nurse', ico: '🤱' },
+    { type: 'diaper', ico: ICO_DIAPER },
     { type: 'bottle', ico: '🍼' },
     { type: 'pump', ico: ICO_PUMP },
-    { type: 'diaper', ico: ICO_DIAPER },
     { type: 'solid', ico: '🥄' },
     { type: 'med', ico: '💊' },
     { type: 'health', ico: '🌡️' },
